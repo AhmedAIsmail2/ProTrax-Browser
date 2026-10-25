@@ -8,7 +8,7 @@ import { Button } from '../components/ui.jsx'
 import { tappable } from '../lib/use-sheet-keyboard.js'
 import { glyphOf, DEFAULT_GLYPH } from '../lib/glyphs.js'
 import { DEMO } from '../lib/demo.js'
-import { MOBILE, IPHONE_PWA } from '../lib/mobile.js'
+import { MOBILE } from '../lib/mobile.js'
 import { coachAvailable } from '../lib/coach.js'
 import { openTutorial } from '../components/TutorialDialog.jsx'
 
@@ -40,7 +40,7 @@ export default function Plan() {
      nothing linked to them, so the feature was reachable only by typing the URL — enabled,
      configured, and invisible. The same predicate every other Coach surface uses gates it, so
      an instance without the feature sees exactly the Plan screen it saw before. */
-  const showCoach = !IPHONE_PWA && coachAvailable(config, user, { demo: DEMO, mobile: MOBILE, coachMode })
+  const showCoach = !MOBILE && coachAvailable(config, user, { demo: DEMO, mobile: MOBILE, coachMode })
 
   const addRoutine = () => {
     const r = { id: uid(), name: t('New routine'), emoji: DEFAULT_GLYPH, ex: [] }
@@ -102,3 +102,4 @@ export default function Plan() {
     </div></div>
   </>
 }
+

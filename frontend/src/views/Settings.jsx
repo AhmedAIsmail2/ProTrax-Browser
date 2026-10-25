@@ -13,7 +13,6 @@ import { t, LANGS, INSTR_LANGS } from '../lib/i18n.js'
 import { DEMO, REPO } from '../lib/demo.js'
 import { MOBILE, IPHONE_PWA, isAndroid, shareExport, syncReminder, checkNotificationPermission, requestNotificationPermission, sendTestNotification } from '../lib/mobile.js'
 import { checkForUpdate, downloadAndInstall } from '../lib/update.js'
-import { ConnectSheet } from './MobileOnboarding.jsx'
 import { starterPlanSheet, confirmSheet, importFromApp, importFromHevy, importHubSheet, equipmentProfileSheet, menuSheet } from '../sheets.jsx'
 import { openTutorial } from '../components/TutorialDialog.jsx'
 import { startAppUpdate } from '../components/UpdateDialog.jsx'
@@ -30,7 +29,7 @@ export default function Settings() {
   const user = useStore(s => s.user)
   const config = useStore(s => s.config)
   const coachLocal = useStore(s => s.coachLocal)
-  const { update, replaceState, setUser, pullState, pushState, signOut, signOutAll, resetDemo, disconnectServer } = useStore()
+  const { update, replaceState, setUser, pullState, pushState, signOut, signOutAll, resetDemo } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
   const importRef = useRef(null)
@@ -51,7 +50,7 @@ export default function Settings() {
     const hevy = await getHevyApiKey()
     setHasHevyKey(!!hevy)
   }
-  useEffect(() => { refreshApiKeys() }, [coachLocal])
+  useEffect(() => { if (!MOBILE) refreshApiKeys() }, [coachLocal])
 
   // Two honest choices on a unit switch (issue #22): convert the numbers, or keep them and only
   // change the label — the old behaviour, still right for someone who logged in lb all along
@@ -101,13 +100,12 @@ export default function Settings() {
   const doExport = async () => {
     const json = JSON.stringify(S, null, 2)
     const name = 'smitrix-backup-' + todayISO() + '.json'
-    // The iPhone web build downloads directly; keep native Android on its existing share-sheet path.
+    // WKWebView can't download blob URLs — the native build hands the file to the share sheet.
     if (IPHONE_PWA) {
       try { await shareExport(json, name); toast(t('Backup exported')) }
       catch { toast(t('Backup export failed')) }
       return
     }
-    // WKWebView can't download blob URLs — the native build hands the file to the share sheet.
     if (MOBILE) {
       try { await shareExport(json, name); toast(t('Backup exported')) } catch (e) { /* share sheet dismissed */ }
       return
@@ -153,21 +151,8 @@ export default function Settings() {
     </div>
 
     {/* ---------- account (demo and mobile builds have nothing to sign in to) ---------- */}
-    <Section title={MOBILE ? (user ? t('Your server') : t('Your data')) : DEMO ? t('Demo') : t('Account')}>
-      {MOBILE ? (user ? <>
-        <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={t('Synced with your SmiTriX server.')} />
-        {user.admin && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
-        <Row icon="signOut" iconTint="var(--red)" title={t('Disconnect')} danger onClick={() => confirmSheet({
-          title: t('Disconnect from your server?'),
-          message: t('Your data is synced to your server first, then this device switches back to local-only.'),
-          confirmText: t('Disconnect'), danger: true,
-          onConfirm: async () => { await disconnectServer(); nav('/home'); toast(t('Disconnected — back to local-only')) },
-        })} />
-      </> : <>
-        <Row icon="lock" iconTint="var(--acc)" title={t('All data stays on this phone')} subtitle={t('No account, no cloud — back it up anytime with Export below.')} />
-        {!IPHONE_PWA && <Row icon="link" iconTint="var(--indigo)" title={t('Connect to my server')} subtitle={t('Sync this device to your own self-hosted SmiTriX instead.')} accessory="chevron"
-          onClick={() => useUI.getState().openSheet(close => <ConnectSheet close={close} />)} />}
-      </>) : DEMO ? <>
+    <Section title={MOBILE ? t('Your data') : DEMO ? t('Demo') : t('Account')}>
+      {MOBILE ? <Row icon="lock" iconTint="var(--acc)" title={t('All data stays on this phone')} subtitle={t('No account, no cloud — back it up anytime with Export below.')} /> : DEMO ? <>
         <Row icon="sparkles" iconTint="var(--acc)" title={t('You’re in the demo')} subtitle={t('Example data, stored only in this browser — change anything you like.')} />
         <Row icon="reset" iconTint="var(--blue)" title={t('Reset demo data')} accessory="chevron"
           onClick={() => confirmSheet({ title: t('Reset demo data?'), message: t('Puts the example plan, workouts and weigh-ins back the way they started.'), confirmText: t('Reset'), onConfirm: () => { resetDemo(); nav('/home'); toast(t('Demo data reset')) } })} />
@@ -190,7 +175,7 @@ export default function Settings() {
     {!user && !DEMO && !MOBILE && <p className="sect-f" style={{ marginTop: -18, marginBottom: 22 }}>{t('Guest mode — data lives only in this browser.')}</p>}
 
     {/* ---------- AI Coach & API Keys ---------- */}
-    {!IPHONE_PWA && <Section
+    {!MOBILE && <Section
       title={t('AI Coach & API Keys')}
       footer={
         coachLocal?.mode === 'byok'
@@ -425,9 +410,9 @@ export default function Settings() {
       <Row icon="shuffle" iconTint="var(--teal)" title={t('Import from another app')}
         subtitle={t('FitNotes, Strong, Hevy — or body weight from Apple Health')}
         accessory="chevron" onClick={importHubSheet} />
-      <Row icon="key" iconTint="var(--teal)" title={t('Import from Hevy')}
+      {!MOBILE && <Row icon="key" iconTint="var(--teal)" title={t('Import from Hevy')}
         subtitle={t('Pull your history with a Hevy Pro API key')}
-        accessory="chevron" onClick={importFromHevy} />
+        accessory="chevron" onClick={importFromHevy} />}
       <Row icon="upload" iconTint="var(--blue)" title={t('Import backup')} accessory="chevron" onClick={() => fileRef.current.click()} />
       <Row icon="download" iconTint="var(--blue)" title={t('Export backup (JSON)')} accessory="chevron" onClick={doExport} />
       {MOBILE && !IPHONE_PWA && <Row icon="history" iconTint="var(--blue)" title={t('Auto-backup on changes')}
@@ -1108,3 +1093,4 @@ export function ApiKeyManagerSheet({ close, onUpdate }) {
     <div style={{ height: 12 }} />
   </>
 }
+

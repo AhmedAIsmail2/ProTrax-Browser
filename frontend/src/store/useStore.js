@@ -4,7 +4,7 @@ import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { guestAllowed } from '../lib/guest.js'
-import { MOBILE, IPHONE_PWA, initReminderSync, nativeLoad, nativeSave, syncReminder, writeAutoBackup } from '../lib/mobile.js'
+import { MOBILE, initReminderSync, nativeLoad, nativeSave, syncReminder, writeAutoBackup } from '../lib/mobile.js'
 import { loadRemote, chooseLocal, forgetRemote, connect } from '../lib/remote.js'
 import { loadCoachDevice, saveCoachDevice, coachDeviceSettings } from '../lib/coach-device.js'
 import { enqueuePushState, clearQueue, flushSyncQueue } from '../lib/sync-queue.js'
@@ -141,7 +141,10 @@ export const useStore = create((set, get) => {
 
   return {
     S: (() => { const s = loadState(); registerCustom(s.customEx); return s })(),
-    user: (() => { try { return JSON.parse(localStorage.getItem('gym_user')) || null } catch { return null } })(),
+    user: (() => {
+      if (MOBILE) return null
+      try { return JSON.parse(localStorage.getItem('gym_user')) || null } catch { return null }
+    })(),
     ready: false,
     /* Instance capabilities from GET /api/config. `config.coach` is present only when the owner
        has both enabled the Coach and connected a provider — every Coach entry point in the app
@@ -272,43 +275,56 @@ export const useStore = create((set, get) => {
 
     // Boot: ask the server who we are, then pull.
     async boot() {
-      // Mobile build: no backend by default — restore from the file mirror (the durable copy;
-      // localStorage may have been evicted since the last run) and go straight in. Unless this
-      // device was paired to a server ("connect to my server" mode, lib/remote.js), in which
-      set({ coachLocal: coachDeviceSettings(await loadCoachDevice()) })
+      // Native and iPhone web builds are local-only. Desktop web keeps its existing account flow.
       if (MOBILE) {
+        if (localStorage.getItem('smitrix-local-only-migration-v1') !== '1') {
+          try {
+            const secrets = await import('../lib/coach-secrets.js')
+            await Promise.all([
+              ...['anthropic', 'openai', 'gemini', 'compatible'].map(id => secrets.clearApiKey(id)),
+              secrets.clearApiKey(),
+              secrets.clearHevyApiKey(),
+              saveCoachDevice({ mode: 'off', provider: null, model: null, baseUrl: null, handle: null, daily: null, pending: null }),
+            ])
+          } catch { /* keep local data if a credential store is unavailable */ }
+          localStorage.setItem('smitrix-local-only-migration-v1', '1')
+        }
+        set({ coachLocal: null })
+      } else {
+        set({ coachLocal: coachDeviceSettings(await loadCoachDevice()) })
+      }
+      if (MOBILE) {
+        const saved = await nativeLoad()
+        const local = get().S
+        if (saved && (!hasData(local) || (saved._ts || 0) >= (local._ts || 0))) {
+          persist(Object.assign(clone(DEF), saved), false)
+        } else if (hasData(local)) {
+          nativeSave(local)
+        }
         const remote = await loadRemote()
         if (remote?.mode === 'remote') {
           setRemoteAuth(remote.base, remote.token)
           try {
-            const me = await api('/api/me')   // also catches a token revoked elsewhere (sign out everywhere)
-            get().setUser(me.user)
-            // The paired server's /api/config, the same one the web boot reads: without it the
-            // phone never learned whether the server offers the Coach and told everyone "your
-            // server has no Coach enabled" — with the admin looking at a green test.
-            await get().loadConfig()
-            await get().pullState()
-          } catch (e) {
-            if (e.status === 401) { await forgetRemote(); get().setGuest(true) }
-            else get().setUser(remote.user)   // offline — keep going from the last-synced local copy
-          }
+            const { state } = await api('/api/data')
+            const current = get().S
+            const restored = restoredStateFor(current, state, localStorage.getItem('gym_dirty') === '1')
+            if (restored) persist(restored, false)
+          } catch { /* offline: keep the last on-device copy */ }
+          await forgetRemote()
+          get().setUser(null)
+          get().setGuest(true)
           syncReminder(get().S)
-          set({ ready: true })
+          set({ ready: true, needsMobileOnboarding: false })
           return
         }
-        const saved = await nativeLoad()
         const S = get().S
-        if (saved && (!hasData(S) || (saved._ts || 0) >= (S._ts || 0))) {
-          persist(Object.assign(clone(DEF), saved), false)
-        } else if (hasData(S)) {
-          nativeSave(S)   // first run after an update from a file-less version: seed the mirror
+        if (hasData(S)) {
+          nativeSave(S)   // seed the durable mirror before entering local-only mode
         }
+        get().setUser(null)
         get().setGuest(true)
         syncReminder(get().S)
-        // Only a genuinely first launch — nothing chosen yet and nothing to lose either — offers
-        // the choice. Picking local (even with no data yet) persists that choice below and this
-        // never asks again.
-        set({ ready: true, needsMobileOnboarding: !IPHONE_PWA && !remote && !hasData(get().S) })
+        set({ ready: true, needsMobileOnboarding: false })
         return
       }
       // Demo build (GitHub Pages): no backend at all — seed once, stay in guest mode.
@@ -346,3 +362,4 @@ export const useStore = create((set, get) => {
 })
 
 export { hasData }
+

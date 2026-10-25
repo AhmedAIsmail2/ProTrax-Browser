@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import Icon from './Icon.jsx'
 import { Button } from './ui.jsx'
 import { t } from '../lib/i18n.js'
+import { MOBILE } from '../lib/mobile.js'
 
 const APP_GUIDES = [
   {
@@ -203,13 +204,16 @@ export default function ImportHubSheet({ close, onFile, onHevyApi }) {
       </div>
 
       {/* Action buttons */}
-      <Button variant="tinted" icon="key" onClick={onHevyApi}>
-        {t('Import with Hevy API')}
-      </Button>
-      <div style={{ height: 8 }} />
+      {!MOBILE && <>
+        <Button variant="tinted" icon="key" onClick={onHevyApi}>
+          {t('Import with Hevy API')}
+        </Button>
+        <div style={{ height: 8 }} />
+      </>}
       <Button variant="ghost" className="dim" onClick={close}>
         {t('Cancel')}
       </Button>
     </div>
   )
 }
+
