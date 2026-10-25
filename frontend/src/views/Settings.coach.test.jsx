@@ -2,7 +2,7 @@
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import Settings, { ApiKeyManagerSheet } from './Settings.jsx'
+import Settings from './Settings.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 globalThis.__APP_VERSION__ ??= 'test'
@@ -150,136 +150,12 @@ const mount = async component => {
   })
 }
 
-describe('Settings — AI Coach & API Keys section', () => {
-  it('renders AI Coach and Manage API Keys rows with active status', async () => {
+describe('removed integrations', () => {
+  it('does not show Coach or API-key management controls in Settings', async () => {
     await mount(<Settings />)
-
-    const text = host.textContent
-    expect(text).toContain('AI Coach & API Keys')
-    expect(text).toContain('Active · Anthropic API (claude-opus-5)')
-    expect(text).toContain('Manage API Keys')
-  })
-
-  it('shows missing key status when active BYOK provider has no key saved', async () => {
-    state.keys['coach.apiKey.anthropic'] = null
-    await mount(<Settings />)
-
-    const text = host.textContent
-    expect(text).toContain('Needs API key · Anthropic API')
-  })
-
-  it('shows active status for OpenAI-compatible even without key', async () => {
-    state.coachLocal = { mode: 'byok', provider: 'compatible', model: 'llama3:latest', baseUrl: 'http://localhost:11434' }
-    await mount(<Settings />)
-
-    const text = host.textContent
-    expect(text).toContain('Active · OpenAI-compatible endpoint (llama3:latest)')
-  })
-
-  it('opens ApiKeyManagerSheet when Manage API Keys row is clicked', async () => {
-    await mount(<Settings />)
-
-    const manageKeysRow = [...host.querySelectorAll('button.lrow')].find(el => el.textContent.includes('Manage API Keys'))
-    expect(manageKeysRow).toBeTruthy()
-    await act(async () => {
-      manageKeysRow.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-    expect(state.ui.openSheet).toHaveBeenCalled()
-  })
-})
-
-describe('ApiKeyManagerSheet', () => {
-  it('switches between AI Coach and Hevy Pro tabs', async () => {
-    await mount(<ApiKeyManagerSheet close={vi.fn()} onUpdate={vi.fn()} />)
-
-    // Initially in coach tab
-    expect(host.textContent).toContain('Anthropic API')
-
-    // Find and click Hevy tab button
-    const hevyBtn = [...host.querySelectorAll('.seg button')].find(b => b.textContent.includes('Hevy Pro'))
-    expect(hevyBtn).toBeTruthy()
-    await act(async () => {
-      hevyBtn.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-
-    expect(host.textContent).toContain('Hevy Pro API key')
-    expect(host.textContent).toContain('Get your key on hevy.com')
-  })
-
-  it('allows switching providers in AI Coach tab and shows endpoint input for compatible', async () => {
-    await mount(<ApiKeyManagerSheet close={vi.fn()} onUpdate={vi.fn()} />)
-
-    // Compatible chip
-    const compatChip = [...host.querySelectorAll('button.chip')].find(b => b.textContent.includes('compatible'))
-    expect(compatChip).toBeTruthy()
-    await act(async () => {
-      compatChip.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-
-    // Endpoint URL input should be visible for compatible
-    expect(host.textContent).toContain('Endpoint URL')
-    expect(host.textContent).toContain('Optional for local models')
-  })
-
-  it('enables connection test button for compatible even without key', async () => {
-    await mount(<ApiKeyManagerSheet close={vi.fn()} onUpdate={vi.fn()} />)
-
-    const compatChip = [...host.querySelectorAll('button.chip')].find(b => b.textContent.includes('compatible'))
-    await act(async () => {
-      compatChip.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-
-    const testBtn = [...host.querySelectorAll('button')].find(b => b.textContent.includes('Test connection'))
-    expect(testBtn).toBeTruthy()
-    expect(testBtn.disabled).toBe(false)
-  })
-
-  it('disables connection test button for Anthropic when no key is entered or saved', async () => {
-    state.keys['coach.apiKey.anthropic'] = null
-    await mount(<ApiKeyManagerSheet close={vi.fn()} onUpdate={vi.fn()} />)
-
-    const testBtn = [...host.querySelectorAll('button')].find(b => b.textContent.includes('Test connection'))
-    expect(testBtn).toBeTruthy()
-    expect(testBtn.disabled).toBe(true)
-  })
-
-  it('removes saved key when Remove key button is clicked', async () => {
-    const onUpdate = vi.fn()
-    await mount(<ApiKeyManagerSheet close={vi.fn()} onUpdate={onUpdate} />)
-
-    const removeBtn = [...host.querySelectorAll('button')].find(b => b.textContent.includes('Remove key'))
-    expect(removeBtn).toBeTruthy()
-    await act(async () => {
-      removeBtn.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-
-    expect(state.keys['coach.apiKey.anthropic']).toBeUndefined()
-    expect(state.ui.toast).toHaveBeenCalledWith('AI Coach key removed (Anthropic API)')
-    expect(onUpdate).toHaveBeenCalled()
-  })
-
-  it('tests Hevy connection and renders success message', async () => {
-    state.keys['hevy.apiKey'] = 'valid-hevy'
-    await mount(<ApiKeyManagerSheet close={vi.fn()} onUpdate={vi.fn()} />)
-
-    const hevyTab = [...host.querySelectorAll('.seg button')].find(b => b.textContent.includes('Hevy Pro'))
-    await act(async () => {
-      hevyTab.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-
-    const testBtn = [...host.querySelectorAll('button')].find(b => b.textContent.includes('Test connection'))
-    expect(testBtn).toBeTruthy()
-    await act(async () => {
-      testBtn.click()
-      await new Promise(r => setTimeout(r, 30))
-    })
-
-    expect(host.textContent).toContain('Connected to Hevy API successfully!')
+    expect(host.textContent).not.toContain('AI Coach & API Keys')
+    expect(host.textContent).not.toContain('Manage API Keys')
+    expect(host.textContent).not.toContain('Hevy API key')
+    expect(host.textContent).toContain('Import from another app')
   })
 })

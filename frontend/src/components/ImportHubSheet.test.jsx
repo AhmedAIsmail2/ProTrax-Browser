@@ -22,7 +22,7 @@ describe('ImportHubSheet', () => {
   })
 
   it('renders app guides and switches tabs', () => {
-    act(() => root.render(<ImportHubSheet close={() => {}} onFile={() => {}} onHevyApi={() => {}} />))
+    act(() => root.render(<ImportHubSheet close={() => {}} onFile={() => {}} />))
     expect(host.textContent).toContain('Import Workout Data')
     expect(host.textContent).toContain('Hevy')
     expect(host.textContent).toContain('Strong')
@@ -34,19 +34,17 @@ describe('ImportHubSheet', () => {
     expect(host.textContent).toContain('Settings → Export Workouts')
   })
 
-  it('calls onHevyApi when the Hevy API button is clicked', () => {
-    const onHevyApi = vi.fn()
-    act(() => root.render(<ImportHubSheet close={() => {}} onFile={() => {}} onHevyApi={onHevyApi} />))
-    const btn = [...host.querySelectorAll('button')].find(b => b.textContent.includes('Import with Hevy API'))
-    expect(btn).toBeTruthy()
-    act(() => btn.click())
-    expect(onHevyApi).toHaveBeenCalledTimes(1)
+  it('keeps Hevy file import without a direct API-key option', () => {
+    act(() => root.render(<ImportHubSheet close={() => {}} onFile={() => {}} />))
+    expect(host.textContent).not.toContain('Import with Hevy API')
+    expect(host.textContent).not.toContain('direct API key')
+    expect(host.querySelector('input[type="file"]').accept).toBe('.csv,.xml,text/csv,text/xml')
   })
 
   it('calls onFile when a file is selected via input', () => {
     const onFile = vi.fn()
     const close = vi.fn()
-    act(() => root.render(<ImportHubSheet close={close} onFile={onFile} onHevyApi={() => {}} />))
+    act(() => root.render(<ImportHubSheet close={close} onFile={onFile} />))
     const input = host.querySelector('input[type="file"]')
     expect(input).toBeTruthy()
 
