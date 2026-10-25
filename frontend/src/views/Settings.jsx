@@ -6,10 +6,11 @@ import { convertStateUnit } from '../lib/units.js'
 import { useUI } from '../store/useUI.js'
 import { ACCENTS, todayISO, localTZ, weekStartOf, MONDAY, SUNDAY } from '../lib/format.js'
 import { effortOf } from '../lib/history.js'
+import { IS_ANDROID } from '../lib/api.js'
 import { wakeLockSupported } from '../lib/wakelock.js'
 import { t, LANGS, INSTR_LANGS } from '../lib/i18n.js'
 import { DEMO } from '../lib/demo.js'
-import { MOBILE, IPHONE_PWA, isAndroid, shareExport, syncReminder, checkNotificationPermission, requestNotificationPermission, sendTestNotification } from '../lib/mobile.js'
+import { MOBILE, isAndroid, shareExport, syncReminder, checkNotificationPermission, requestNotificationPermission, sendTestNotification } from '../lib/mobile.js'
 import { checkForUpdate, downloadAndInstall } from '../lib/update.js'
 import { starterPlanSheet, confirmSheet, importFromApp, importFromHevy, importHubSheet, equipmentProfileSheet, menuSheet } from '../sheets.jsx'
 import { openTutorial } from '../components/TutorialDialog.jsx'
@@ -17,6 +18,10 @@ import { startAppUpdate } from '../components/UpdateDialog.jsx'
 import Icon from '../components/Icon.jsx'
 import { Section, Row, SelectRow, Switch, Segmented, Button, TextField } from '../components/ui.jsx'
 import { playRestChime } from '../lib/sound.js'
+
+// Read this directly from Vite so tests or other builds that mock mobile.js do not
+// need to duplicate this build-only flag.
+const IPHONE_PWA = import.meta.env.VITE_IPHONE_PWA === '1'
 
 export default function Settings() {
   const nav = useNavigate()

@@ -29,6 +29,7 @@ import History from './views/History.jsx'
 import Library from './views/Library.jsx'
 import Muscles from './views/Muscles.jsx'
 import Settings from './views/Settings.jsx'
+import Login from './views/Login.jsx'
 
 // last known scrollY per route, so back-navigation can put the page where it was
 const scrollPositions = new Map()
@@ -52,7 +53,8 @@ function Shell() {
   const navigate = useNavigate()
   const loc = useLocation()
   const navType = useNavigationType()
-  const { S, ready } = useStore()
+  const { S, user, ready } = useStore()
+  const isGuest = useStore(s => s.isGuest())
   const langV = useLang()   // re-renders the whole shell when the language (pack) changes
   useEffect(() => { setNav(navigate) }, [navigate])
   useEffect(() => { applyPrefs(S.theme, S.accent) }, [S.theme, S.accent])
@@ -92,7 +94,8 @@ function Shell() {
   // bound to the workout, not to the route — checking Stats mid-session keeps the screen on
   useWakeLock(!!S.active && S.keepAwake !== false)
 
-  if (!ready) return (
+  const authed = __LOCAL_ONLY_BUILD__ || user || isGuest
+  if (!ready && !authed) return (
     <div id="app">
       <div style={{ paddingTop: '44vh', display: 'flex', justifyContent: 'center', fontSize: 34, color: 'var(--label-3)' }}>
         <Icon name="dumbbell" />
@@ -106,7 +109,7 @@ function Shell() {
           re-mounts the boundary, so the tab bar is always a way out */}
       <div id="app" className="vfade" key={loc.pathname}>
         <ErrorBoundary>
-          <Routes>
+          {!authed ? <Login /> : <Routes>
               <Route path="/home" element={<Home />} />
               {/* Gym check-in — switched off in Settings, the route falls through to the
                   catch-all redirect below. */}
@@ -121,11 +124,11 @@ function Shell() {
               <Route path="/muscles" element={<Muscles />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/home" replace />} />
-          </Routes>
+          </Routes>}
         </ErrorBoundary>
       </div>
       {/* The chat owns the bottom of the screen: its composer sits where the tabs would be. */}
-      <TabBar onStart={startFlow} />
+      {authed && <TabBar onStart={startFlow} />}
       <RestTimer />
       <Modals />
       <Toast />
