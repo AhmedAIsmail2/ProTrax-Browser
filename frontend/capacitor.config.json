@@ -1,0 +1,14 @@
+{
+  "appId": "com.smitrix.app",
+  "appName": "SmiTriX Ahmed's Version",
+  "webDir": "dist",
+  "backgroundColor": "#0c0e12",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- Keep the test build clearly identified while using the requested custom app label. -->
+    <string name="app_name">SmiTriX Ahmed\'s Version</string>
+    <string name="title_activity_main">SmiTriX Ahmed\'s Version</string>
+</resources>

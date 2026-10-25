@@ -1,0 +1,28 @@
+# Exercise media — fetched on first `docker compose up` (or via scripts/fetch-media.sh)
+media/img/
+media/gif/
+
+# Runtime data — users, passkeys, per-user state, session secret
+data/
+
+# Local config
+.env
+smitrix-backup-*.json
+.idea/
+
+# Build output / deps
+frontend/dist/
+frontend/dist-iphone/
+node_modules/
+*.log
+.DS_Store
+node_modules
+.claude/
+.agents/
+
+# CI reports (test:* jobs write these next to the suites)
+junit.xml
+coverage/
+frontend/bundle-size.json
+brag-output/
+

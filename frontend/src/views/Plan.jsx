@@ -1,0 +1,104 @@
+import { useNavigate } from 'react-router-dom'
+import { useStore } from '../store/useStore.js'
+import { DAYN, weekOrder, weekStartOf, uid, exCount, todayISO, startOfWeek, isoOf } from '../lib/format.js'
+import { t } from '../lib/i18n.js'
+import { dayAssignSheet, extraDayAssignSheet, starterPlanSheet, planToolsSheet } from '../sheets.jsx'
+import Icon from '../components/Icon.jsx'
+import { Button } from '../components/ui.jsx'
+import { tappable } from '../lib/use-sheet-keyboard.js'
+import { glyphOf, DEFAULT_GLYPH } from '../lib/glyphs.js'
+import { DEMO } from '../lib/demo.js'
+import { MOBILE, IPHONE_PWA } from '../lib/mobile.js'
+import { coachAvailable } from '../lib/coach.js'
+import { openTutorial } from '../components/TutorialDialog.jsx'
+
+export default function Plan() {
+  const nav = useNavigate()
+  const S = useStore(s => s.S)
+  const update = useStore(s => s.update)
+  const config = useStore(s => s.config)
+  const coachMode = useStore(s => s.coachLocal?.mode)
+  const user = useStore(s => s.user)
+  const extras = Array.isArray(S.weekExtra) ? S.weekExtra : []
+  const cycleStart = S.weekCycleStart || isoOf(startOfWeek(todayISO(), weekStartOf(S)))
+  const order = extras.length ? weekOrder(new Date(cycleStart + 'T12:00:00').getDay()) : weekOrder(weekStartOf(S))
+  const extraDayLabel = index => {
+    const d = new Date(cycleStart + 'T12:00:00')
+    d.setDate(d.getDate() + 7 + index)
+    return DAYN[d.getDay()]
+  }
+  const addDay = () => update(s => {
+    if (!s.weekExtra?.length || !s.weekCycleStart) s.weekCycleStart = isoOf(startOfWeek(todayISO(), weekStartOf(s)))
+    s.weekExtra = [...(s.weekExtra || []), null]
+  })
+  const removeDay = index => update(s => {
+    s.weekExtra.splice(index, 1)
+    if (!s.weekExtra.length) s.weekCycleStart = null
+  })
+
+  /* The Coach's only entry point in the app. Its screens have existed since the UI landed and
+     nothing linked to them, so the feature was reachable only by typing the URL — enabled,
+     configured, and invisible. The same predicate every other Coach surface uses gates it, so
+     an instance without the feature sees exactly the Plan screen it saw before. */
+  const showCoach = !IPHONE_PWA && coachAvailable(config, user, { demo: DEMO, mobile: MOBILE, coachMode })
+
+  const addRoutine = () => {
+    const r = { id: uid(), name: t('New routine'), emoji: DEFAULT_GLYPH, ex: [] }
+    update(s => { s.routines.push(r) })
+    nav('/plan/r/' + r.id)
+  }
+
+  return <>
+    <div className="hdr">
+      <div><h1>{t('Plan')}</h1><div className="sub">{t('Your weekly routine')}</div></div>
+      <div className="row" style={{ gap: 6 }}>
+        <button className="iconbtn" onClick={() => openTutorial(1)} aria-label={t('How planning works')} title={t('How planning works')}><Icon name="help" /></button>
+        <button className="iconbtn" onClick={planToolsSheet} aria-label={t('Share your plan')} title={t('Share your plan')}><Icon name="upload" /></button>
+      </div>
+    </div>
+    {showCoach && <button className="coach-cta" onClick={() => nav('/coach')}>
+      <span className="coach-cta-av"><Icon name="sparkles" /></span>
+      <span className="coach-cta-t">
+        <b>{t('Coach')}</b>
+        <span>{t('Plan design and reviews, from your own training')}</span>
+      </span>
+      <Icon name="chevronRight" className="coach-cta-chev" />
+    </button>}
+
+    <div className="cols"><div>
+      <h4 className="sec">{t('Week schedule')}</h4>
+      <div className="list" style={{ display: 'flex', flexDirection: 'column' }}>
+        {order.map(d => {
+          const r = S.routines.find(x => x.id === S.week[d])
+          return <div key={d} className="item" {...tappable(() => dayAssignSheet(d))}>
+            <div className="grow"><div className="tt">{t(DAYN[d])}</div></div>
+            {r ? <span className="tag acc"><Icon name={glyphOf(r.emoji)} />{r.name}</span> : <span className="tag">{t('Rest')}</span>}
+            <Icon name="chevronRight" className="chev" /></div>
+        })}
+        {extras.map((rid, i) => {
+          const r = S.routines.find(x => x.id === rid)
+          return <div key={'extra-' + i} className="item" {...tappable(() => extraDayAssignSheet(i, extraDayLabel(i)))}>
+            <div className="grow"><div className="tt">{t(extraDayLabel(i))}</div><div className="ss">{t('Additional cycle day')}</div></div>
+            {r ? <span className="tag acc"><Icon name={glyphOf(r.emoji)} />{r.name}</span> : <span className="tag">{t('Rest')}</span>}
+            <button className="iconbtn" aria-label={t('Delete day')} onClick={e => { e.stopPropagation(); removeDay(i) }}><Icon name="trash" /></button>
+            <Icon name="chevronRight" className="chev" /></div>
+        })}
+      </div>
+      <Button size="sm" variant="tinted" icon="plus" onClick={addDay} style={{ marginTop: 10 }}>{t('New day')}</Button>
+    </div><div>
+      <div className="row between" style={{ marginTop: 22, marginBottom: 10 }}>
+        <h4 className="sec" style={{ margin: 0 }}>{t('Routines')}</h4>
+        <Button size="sm" variant="tinted" icon="plus" onClick={addRoutine}>{t('New')}</Button>
+      </div>
+      {S.routines.length ? <div className="list">{S.routines.map(r => <div key={r.id} className="item" {...tappable(() => nav('/plan/r/' + r.id))}>
+        <span className="lrow-i"><Icon name={glyphOf(r.emoji)} /></span>
+        <div className="grow"><div className="tt">{r.name}</div><div className="ss">{exCount(r.ex.length)}</div></div>
+        <Icon name="chevronRight" className="chev" /></div>)}</div> : <>
+        <div className="empty"><div className="ico"><Icon name="clipboard" /></div>{t('No routines yet.')}<br />{t('Create one or load the starter plan.')}</div>
+        <Button icon="sparkles" onClick={starterPlanSheet}>{t('Load starter plan')}</Button>
+        <div style={{ height: 8 }} />
+        <Button variant="ghost" className="dim" icon="lightbulb" onClick={() => openTutorial(1)}>{t('How planning works (Guide)')}</Button>
+      </>}
+    </div></div>
+  </>
+}
