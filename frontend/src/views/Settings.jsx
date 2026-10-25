@@ -101,6 +101,12 @@ export default function Settings() {
   const doExport = async () => {
     const json = JSON.stringify(S, null, 2)
     const name = 'smitrix-backup-' + todayISO() + '.json'
+    // The iPhone web build downloads directly; keep native Android on its existing share-sheet path.
+    if (IPHONE_PWA) {
+      try { await shareExport(json, name); toast(t('Backup exported')) }
+      catch { toast(t('Backup export failed')) }
+      return
+    }
     // WKWebView can't download blob URLs — the native build hands the file to the share sheet.
     if (MOBILE) {
       try { await shareExport(json, name); toast(t('Backup exported')) } catch (e) { /* share sheet dismissed */ }
