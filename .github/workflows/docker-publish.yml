@@ -5,11 +5,8 @@ name: Publish Docker images
 # would otherwise leave its image tags behind in GHCR forever, and dependency
 # bots read those as a newer version. See issue #87.
 on:
-  push:
-    branches: [main]
   release:
     types: [published]
-  workflow_dispatch:
 
 permissions:
   contents: read
