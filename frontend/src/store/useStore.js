@@ -1,13 +1,7 @@
 import { create } from 'zustand'
-import { api, setRemoteAuth } from '../lib/api.js'
-import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
-import { guestAllowed } from '../lib/guest.js'
 import { MOBILE, initReminderSync, nativeLoad, nativeSave, syncReminder, writeAutoBackup } from '../lib/mobile.js'
-import { loadRemote, chooseLocal, forgetRemote, connect } from '../lib/remote.js'
-import { loadCoachDevice, saveCoachDevice, coachDeviceSettings } from '../lib/coach-device.js'
-import { enqueuePushState, clearQueue, flushSyncQueue } from '../lib/sync-queue.js'
 
 import { WC_DEFAULT } from '../lib/workout-controls.js'
 
@@ -39,8 +33,7 @@ export const DEF = {
   // every time you do the movement ("seat 4, pin 7"). Distinct from a routine's `note`, which
   // belongs to one exercise in one plan, and from a session note, which belongs to one day.
   exNotes: {},
-  // Favourite exercise ids (issue #6) — sorted to the top of the picker/Library. Personal, so
-  // it syncs with the profile but is never part of a shared plan bundle (lib/favourites.js).
+  // Favourite exercise ids (issue #6) — sorted to the top of the picker/Library. Personal and never part of a shared plan bundle (lib/favourites.js).
   favEx: [],
   // First day of the week as a getDay() index — 1 Monday, 0 Sunday. Monday is the default so
   // every profile written before this setting existed keeps the week it has been looking at.
@@ -55,7 +48,7 @@ export const DEF = {
   // of the card, or scanning it. We only ever keep the code's VALUE, never a photo: the image
   // is regenerated from `value` every time it's shown (lib/qr.js). `fmt` is the barcode symbology
   // ('qrcode' | 'ean13' | 'code128' | … — lower-cased BarcodeFormat) so it renders as the same
-  // kind of code the gym issued. Just data, so it syncs and backs up like everything else.
+  // kind of code the gym issued. Just data, so it backs up like everything else.
   //   [{ id, label, value, fmt }]
   gymCards: [],
   // Whether the check-in feature is on at all (Settings toggle). Off hides the Home
@@ -75,18 +68,7 @@ function loadState() {
 
 const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
 
-// Decide whether a pulled account state may replace the local saved state. A local active workout
-// is deliberately carried forward: the server stores completed/saved state, while the in-progress
-// session belongs to the device that is currently running it.
-export function restoredStateFor(local, remote, dirty = false) {
-  if (!remote || (hasData(local) && (dirty || (remote._ts || 0) < (local._ts || 0)))) return null
-  const next = Object.assign(clone(DEF), remote)
-  if (local.active) next.active = local.active
-  return next
-}
-
 export const useStore = create((set, get) => {
-  let pushTm = null
   let saveTm = null
 
   initReminderSync(() => get().S)
@@ -104,10 +86,6 @@ export const useStore = create((set, get) => {
     localStorage.setItem(KEY, JSON.stringify(S))
     set({ S })
     if (MOBILE) nativePersist()
-    if (push && get().user) {
-      clearTimeout(pushTm)
-      pushTm = setTimeout(() => get().pushState(), 1500)
-    }
   }
 
   // A setting changed right before switching away/closing the tab must not get lost mid-debounce
@@ -122,43 +100,12 @@ export const useStore = create((set, get) => {
       nativeSave(get().S)
       syncReminder(get().S)
     }
-    if (pushTm) {
-      clearTimeout(pushTm)
-      pushTm = null
-      get().pushState()
-    }
   })
-
-  // Everything a sign-out leaves behind on this device, whichever way it was triggered.
-  const clearLocalSession = () => {
-    get().setUser(null)
-    localStorage.removeItem('gym_guest')
-    localStorage.removeItem('gym_dirty')
-    localStorage.removeItem(KEY)
-    clearQueue()
-    persist(clone(DEF), false)
-  }
 
   return {
     S: (() => { const s = loadState(); registerCustom(s.customEx); return s })(),
-    user: (() => {
-      if (MOBILE) return null
-      try { return JSON.parse(localStorage.getItem('gym_user')) || null } catch { return null }
-    })(),
+    user: null,
     ready: false,
-    /* Instance capabilities from GET /api/config. `config.coach` is present only when the owner
-       has both enabled the Coach and connected a provider — every Coach entry point in the app
-       hangs off it via coachAvailable(), so an unconfigured instance renders exactly what it
-       always did, and a configured one is the only place any of it appears. */
-    config: null,
-    needsMobileOnboarding: false,   // mobile build only — set true by boot() on a genuine first launch
-    // Mobile build only: how the Coach runs on this phone — { mode: 'off'|'server'|'byok',
-    // provider, model, baseUrl } from lib/coach-device.js. Never the key, never a proposal.
-    coachLocal: null,
-    async setCoachLocal(patch) {
-      set({ coachLocal: coachDeviceSettings(await saveCoachDevice(patch)) })
-    },
-
     // Mutate a draft of S via producer fn, then persist + schedule sync.
     update(mut, push = true) {
       const S = clone(get().S)
@@ -176,94 +123,7 @@ export const useStore = create((set, get) => {
     },
 
     isGuest: () => localStorage.getItem('gym_guest') === '1',
-    setGuest(v) { if (v) localStorage.setItem('gym_guest', '1'); else localStorage.removeItem('gym_guest'); set({}) },
-
-    // Public config from /api/config (invite_only, allow_guest). null until the first successful
-    // fetch — the login screen and boot both read it, so it is fetched once and cached here
-    // rather than by each screen that happens to need it.
-    config: null,
-    async loadConfig() {
-      if (get().config) return get().config
-      return get().refreshConfig()
-    },
-    // Always asks. The cached copy is right for one boot, but an admin can switch the Coach on
-    // while a paired phone sits on the setup screen — that screen wants today's answer.
-    async refreshConfig() {
-      try { const c = await api('/api/config'); set({ config: c }); return c }
-      catch { return null }
-    },
-
-    setUser(u) {
-      if (u) { localStorage.setItem('gym_user', JSON.stringify(u)); localStorage.removeItem('gym_guest') }
-      else localStorage.removeItem('gym_user')
-      set({ user: u })
-    },
-
-    async pushState() {
-      if (!get().user) return
-      clearTimeout(pushTm)
-      try {
-        await api('/api/data', { method: 'PUT', body: JSON.stringify({ state: get().S }) })
-        localStorage.removeItem('gym_dirty')
-      } catch (e) {
-        localStorage.setItem('gym_dirty', '1')
-        enqueuePushState(get().S)
-      }
-    },
-    async pullState() {
-      try {
-        const { state } = await api('/api/data')
-        const S = get().S
-        const dirty = localStorage.getItem('gym_dirty') === '1'
-        const restored = restoredStateFor(S, state, dirty)
-        if (restored) {
-          persist(restored, false)
-        } else if (hasData(S)) { await get().pushState() }
-        flushSyncQueue().catch(() => {})
-      } catch (e) { /* offline — keep local */ }
-    },
-
-    async signOut() {
-      try { await get().pushState(); await api('/api/logout', { method: 'POST', body: '{}' }) } catch (e) { /* */ }
-      clearLocalSession()
-    },
-
-    // Mobile-only ("connect to my server" onboarding, see App.jsx's needsMobileOnboarding).
-    // Picking local — even before there's any data — persists the choice so onboarding never
-    // asks again.
-    async chooseLocalMode() {
-      await chooseLocal()
-      set({ needsMobileOnboarding: false })
-    },
-    // Redeems the pairing code shown in the browser (Settings → "Pair the mobile app") and
-    // switches this device over to that account, same as signing in on the web does.
-    async connectToServer(url, code) {
-      const user = await connect(url, code)   // throws on a bad URL/expired code — caller shows it
-      get().setUser(user)
-      await get().refreshConfig()   // what this server offers (the Coach, guest mode) — see boot()
-      await get().pullState()
-      syncReminder(get().S)
-      set({ needsMobileOnboarding: false })
-    },
-    // Leaves remote mode and drops cleanly back to local-only, without losing whatever was last
-    // synced (signOut() already pushes before it clears).
-    async disconnectServer() {
-      await get().signOut()
-      await forgetRemote()
-      get().setGuest(true)
-      set({ ready: true })
-    },
-
-    // "Sign out everywhere": the server bumps this profile's session version, which kills every
-    // session it has on any device — this browser included, so the app has to end up exactly
-    // where a normal signOut leaves it. Unlike signOut the request is NOT swallowed: if it fails
-    // the sessions elsewhere are all still valid, and wiping this device's copy of the data
-    // would sign the user out of the one place the bump didn't reach. Caller reports the error.
-    async signOutAll() {
-      await get().pushState()   // never throws — stores gym_dirty and moves on when offline
-      await api('/api/logout/all', { method: 'POST', body: '{}' })
-      clearLocalSession()
-    },
+    setGuest() { localStorage.setItem('gym_guest', '1'); set({}) },
 
     // Demo build only: drop the seeded example profile back in (Settings → "Reset demo data").
     // Dynamic import so the generator never ships in a self-hosted bundle.
@@ -273,26 +133,8 @@ export const useStore = create((set, get) => {
       persist(Object.assign(clone(DEF), buildDemoState()), false)
     },
 
-    // Boot: ask the server who we are, then pull.
+    // Local-only boot: the mobile app and static site never contact a server.
     async boot() {
-      // Native and iPhone web builds are local-only. Desktop web keeps its existing account flow.
-      if (MOBILE) {
-        if (localStorage.getItem('smitrix-local-only-migration-v1') !== '1') {
-          try {
-            const secrets = await import('../lib/coach-secrets.js')
-            await Promise.all([
-              ...['anthropic', 'openai', 'gemini', 'compatible'].map(id => secrets.clearApiKey(id)),
-              secrets.clearApiKey(),
-              secrets.clearHevyApiKey(),
-              saveCoachDevice({ mode: 'off', provider: null, model: null, baseUrl: null, handle: null, daily: null, pending: null }),
-            ])
-          } catch { /* keep local data if a credential store is unavailable */ }
-          localStorage.setItem('smitrix-local-only-migration-v1', '1')
-        }
-        set({ coachLocal: null })
-      } else {
-        set({ coachLocal: coachDeviceSettings(await loadCoachDevice()) })
-      }
       if (MOBILE) {
         const saved = await nativeLoad()
         const local = get().S
@@ -301,65 +143,16 @@ export const useStore = create((set, get) => {
         } else if (hasData(local)) {
           nativeSave(local)
         }
-        const remote = await loadRemote()
-        if (remote?.mode === 'remote') {
-          setRemoteAuth(remote.base, remote.token)
-          try {
-            const { state } = await api('/api/data')
-            const current = get().S
-            const restored = restoredStateFor(current, state, localStorage.getItem('gym_dirty') === '1')
-            if (restored) persist(restored, false)
-          } catch { /* offline: keep the last on-device copy */ }
-          await forgetRemote()
-          get().setUser(null)
-          get().setGuest(true)
-          syncReminder(get().S)
-          set({ ready: true, needsMobileOnboarding: false })
-          return
-        }
-        const S = get().S
-        if (hasData(S)) {
-          nativeSave(S)   // seed the durable mirror before entering local-only mode
-        }
-        get().setUser(null)
-        get().setGuest(true)
-        syncReminder(get().S)
-        set({ ready: true, needsMobileOnboarding: false })
-        return
       }
-      // Demo build (GitHub Pages): no backend at all — seed once, stay in guest mode.
-      if (DEMO) {
-        if (!localStorage.getItem(DEMO_SEEDED)) {
-          localStorage.setItem(DEMO_SEEDED, '1')
-          await get().resetDemo()
-        }
-        get().setGuest(true)
-        set({ ready: true })
-        return
+      if (DEMO && !localStorage.getItem(DEMO_SEEDED)) {
+        localStorage.setItem(DEMO_SEEDED, '1')
+        await get().resetDemo()
       }
-      // Guests never authenticate, so an instance that turned guest mode off has no request to
-      // refuse — the only way the switch reaches someone already inside is here, on their next
-      // boot. Ending the session needs a positive `allow_guest: false`; see lib/guest.js for why
-      // an unreachable server must not be allowed to lock anyone out (#42).
-      const cfg = await get().loadConfig()
-      if (!guestAllowed(cfg)) get().setGuest(false)
-      try {
-        const me = await api('/api/me')
-        get().setUser(me.user)
-        await get().pullState()
-        // Re-stamp the reminder's timezone on every load — keeps it correct if you're travelling,
-        // without needing to revisit Settings.
-        const tz = localTZ()
-        if (get().S.reminder?.on && get().S.reminder.tz !== tz) {
-          get().update(s => { s.reminder = { ...s.reminder, tz } })
-        }
-      } catch (e) {
-        if (e.status === 401) get().setUser(null)
-      }
+      localStorage.setItem('gym_guest', '1')
+      if (MOBILE) syncReminder(get().S)
       set({ ready: true })
-    }
+    },
   }
 })
 
 export { hasData }
-

@@ -10,7 +10,6 @@ import { effectiveRoutine, lastEntryFor, bestWeightFor, bestWeightForEntry, buil
 import { fmtNum, fmtDate, todayISO, exCount, DAYN, uid } from '../lib/format.js'
 import { beep, vibrate } from '../lib/sound.js'
 import { t, exerciseNameFor } from '../lib/i18n.js'
-import { api } from '../lib/api.js'
 import { insertionIndexAfterCurrentUnit, nextUnfinishedUnit, setProgressHighWater, supersetFlowStep, restAfterSet, restOnRecheck, restSecFor } from '../lib/supersetFlow.js'
 import Media from '../components/Media.jsx'
 import { startFlow, exercisePicker, exConfigSheet, exerciseDetailSheet, finishWorkout, workoutCompleteSheet, confirmSheet, exerciseNoteSheet, sessionNoteSheet, swapActiveWorkoutExercise, barWeightSheet, plateCalculatorSheet, menuSheet, effortPickerSheet, exerciseHistorySheet } from '../sheets.jsx'
@@ -25,7 +24,6 @@ import { isWarmupRow, isDropSet, isRestPauseSet, dropsOf, clustersOf, addDrop, a
 import { canMoveActiveWorkoutUnit, moveActiveWorkoutUnit } from '../lib/active-workout-order.js'
 import { openTutorial } from '../components/TutorialDialog.jsx'
 import { HeartRateBadge } from '../components/HeartRateMonitor.jsx'
-import { SyncStatusBadge } from '../components/SyncStatusBadge.jsx'
 import { FormCheckBadge, openFormCheckPlayer, openFormCheckRecorder } from '../components/FormCheckVaultModal.jsx'
 
 const SWIPE_MIN_DISTANCE = 48
@@ -1248,33 +1246,6 @@ function ActiveWorkout() {
     }
   }
 
-  // Live-presence heartbeat so the admin dashboard can show who's training now. Signed-in only —
-  // guests have no server session. Reads fresh state each tick so progress stays current.
-  useEffect(() => {
-    if (!useStore.getState().user) return
-    let stopped = false
-    const ping = active => {
-      const A2 = useStore.getState().S.active
-      if (!A2) return
-      const u = supersetUnits(A2.entries)
-      const c = Math.min(A2.cur, Math.max(0, A2.entries.length - 1))
-      const ui = u.findIndex(x => x.includes(c))
-      const tot = A2.entries.reduce((n, e) => n + e.sets.length, 0)
-      api('/api/activity', { method: 'POST', body: JSON.stringify({
-        active, name: A2.name, exIdx: ui + 1, exTotal: u.length,
-        setsDone: setsDoneActive(A2), setsTotal: tot, startedAt: A2.start
-      }) }).catch(() => {})
-    }
-    ping(true)
-    const iv = setInterval(() => { if (!stopped) ping(true) }, 20000)
-    return () => {
-      stopped = true; clearInterval(iv)
-      // best-effort "left" signal: sendBeacon survives a tab close, fetch covers in-app nav
-      try { navigator.sendBeacon?.('/api/activity', new Blob([JSON.stringify({ active: false })], { type: 'application/json' })) } catch { /* */ }
-      api('/api/activity', { method: 'POST', body: JSON.stringify({ active: false }) }).catch(() => {})
-    }
-  }, [])
-
   const openAddExercise = () => exercisePicker((ex, quick) => {
     const routine = S.routines.find(r => r.id === A.routineId)
     const freestyle = !A.routineId
@@ -1325,7 +1296,6 @@ function ActiveWorkout() {
           <span className="h-stat"><Icon name="check" style={{ fontSize: 11 }} /> {done}/{total}</span>
           <span className="h-stat-sep">·</span>
           <HeartRateBadge />
-          <SyncStatusBadge />
         </div>
       </div>
       <button className="btn primary sm workout-finish-btn" aria-label={t('Finish')} onClick={finishWorkout}>

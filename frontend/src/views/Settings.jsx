@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, forwardRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useStore, DEF, hasData } from '../store/useStore.js'
+import { useStore, DEF } from '../store/useStore.js'
 import { workoutControls } from '../lib/workout-controls.js'
 import { convertStateUnit } from '../lib/units.js'
 import { useUI } from '../store/useUI.js'
 import { ACCENTS, todayISO, localTZ, weekStartOf, MONDAY, SUNDAY } from '../lib/format.js'
 import { effortOf } from '../lib/history.js'
-import { api, webauthnOK, passkeyLogin, passkeyRegister, IS_ANDROID } from '../lib/api.js'
-import { pushSupported, enablePush, disablePush, sendTestPush } from '../lib/push.js'
 import { wakeLockSupported } from '../lib/wakelock.js'
 import { t, LANGS, INSTR_LANGS } from '../lib/i18n.js'
-import { DEMO, REPO } from '../lib/demo.js'
+import { DEMO } from '../lib/demo.js'
 import { MOBILE, IPHONE_PWA, isAndroid, shareExport, syncReminder, checkNotificationPermission, requestNotificationPermission, sendTestNotification } from '../lib/mobile.js'
 import { checkForUpdate, downloadAndInstall } from '../lib/update.js'
 import { starterPlanSheet, confirmSheet, importFromApp, importFromHevy, importHubSheet, equipmentProfileSheet, menuSheet } from '../sheets.jsx'
@@ -19,38 +17,15 @@ import { startAppUpdate } from '../components/UpdateDialog.jsx'
 import Icon from '../components/Icon.jsx'
 import { Section, Row, SelectRow, Switch, Segmented, Button, TextField } from '../components/ui.jsx'
 import { playRestChime } from '../lib/sound.js'
-import { getApiKey, setApiKey, clearApiKey, hasApiKey, getHevyApiKey, setHevyApiKey, clearHevyApiKey } from '../lib/coach-secrets.js'
-import { HTTP_PROVIDERS, HTTP_PROVIDER_IDS, validateBaseUrl } from '../../../api/coach/core/providers.js'
-import { testHevyApiKey } from '../lib/import-hevy.js'
 
 export default function Settings() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
-  const user = useStore(s => s.user)
-  const config = useStore(s => s.config)
-  const coachLocal = useStore(s => s.coachLocal)
-  const { update, replaceState, setUser, pullState, pushState, signOut, signOutAll, resetDemo } = useStore()
+  const { update, replaceState, resetDemo } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
   const importRef = useRef(null)
   const wakeOK = wakeLockSupported()
-
-  const [hasCoachKey, setHasCoachKey] = useState(false)
-  const [hasHevyKey, setHasHevyKey] = useState(false)
-  const [savedProviderCount, setSavedProviderCount] = useState(0)
-
-  const refreshApiKeys = async () => {
-    let count = 0
-    for (const id of HTTP_PROVIDER_IDS) {
-      if (await hasApiKey(id)) count++
-    }
-    setSavedProviderCount(count)
-    const activeKey = await getApiKey(coachLocal?.provider)
-    setHasCoachKey(!!activeKey)
-    const hevy = await getHevyApiKey()
-    setHasHevyKey(!!hevy)
-  }
-  useEffect(() => { if (!MOBILE) refreshApiKeys() }, [coachLocal])
 
   // Two honest choices on a unit switch (issue #22): convert the numbers, or keep them and only
   // change the label — the old behaviour, still right for someone who logged in lb all along
@@ -126,110 +101,19 @@ export default function Settings() {
     }
     rd.readAsText(f)
   }
-  const signInHere = async () => {
-    try { const u = await passkeyLogin(); setUser(u); await pullState(); toast(t('Welcome back, {0}', u.name)) }
-    catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast(e.message || t('Sign-in failed')) }
-  }
-  const registerHere = () => useUI.getState().openSheet(close => <RegisterInline close={close} setUser={setUser} pushState={pushState} pullState={pullState} toast={toast} />)
-  // Ends the profile's sessions on every device — this one included, so on success it lands in
-  // the same place as the plain sign-out above (home, local data cleared). On failure nothing
-  // local is touched: still signed in here, and say so rather than leaving a half-signed-out app.
-  const signOutEverywhere = () => confirmSheet({
-    title: t('Sign out everywhere?'),
-    message: t('Signs this profile out on every device, including this one. Your passkeys keep working — sign in with them again anytime.'),
-    confirmText: t('Sign out everywhere'), danger: true,
-    onConfirm: async () => {
-      try { await signOutAll(); nav('/home'); toast(t('Signed out on all devices')) }
-      catch (e) { toast(t('Could not sign out everywhere — you are still signed in.')) }
-    },
-  })
-
   return <div className="narrow">
     <div className="hdr">
       <button className="iconbtn" onClick={() => nav('/home')} aria-label={t('Home')}><Icon name="chevronLeft" /></button>
       <div style={{ flex: 1, marginLeft: 10 }}><h1>{t('Settings')}</h1></div>
     </div>
 
-    {/* ---------- account (demo and mobile builds have nothing to sign in to) ---------- */}
-    <Section title={MOBILE ? t('Your data') : DEMO ? t('Demo') : t('Account')}>
-      {MOBILE ? <Row icon="lock" iconTint="var(--acc)" title={t('All data stays on this phone')} subtitle={t('No account, no cloud — back it up anytime with Export below.')} /> : DEMO ? <>
+    <Section title={DEMO ? t('Demo') : t('Your data')}>
+      {DEMO ? <>
         <Row icon="sparkles" iconTint="var(--acc)" title={t('You’re in the demo')} subtitle={t('Example data, stored only in this browser — change anything you like.')} />
         <Row icon="reset" iconTint="var(--blue)" title={t('Reset demo data')} accessory="chevron"
           onClick={() => confirmSheet({ title: t('Reset demo data?'), message: t('Puts the example plan, workouts and weigh-ins back the way they started.'), confirmText: t('Reset'), onConfirm: () => { resetDemo(); nav('/home'); toast(t('Demo data reset')) } })} />
-        <Row icon="rocket" iconTint="var(--indigo)" title={t('Self-host SmiTriX')} subtitle={t('Passkey sign-in, sync across your devices, your own data.')} accessory="chevron"
-          onClick={() => window.open(REPO, '_blank', 'noopener')} />
-      </> : user ? <>
-        <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={t('Signed in with passkey — data syncs to this profile.')} />
-        {user.admin && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
-        <Row icon="link" iconTint="var(--blue)" title={t('Pair the mobile app')} subtitle={t('Connect the SmiTriX app on your phone to this account.')} accessory="chevron"
-          onClick={() => useUI.getState().openSheet(close => <PairSheet close={close} />)} />
-        <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: () => { signOut(); nav('/home') } })} />
-        <Row icon="shield" iconTint="var(--red)" title={t('Sign out everywhere')} subtitle={t('Ends this profile’s sessions on all your devices.')} danger onClick={signOutEverywhere} />
-      </> : webauthnOK() ? <>
-        <Row icon="sparkles" iconTint="var(--acc)" title={t('Create passkey profile')} subtitle={t('Keeps your data safe and separate per person.')} accessory="chevron" onClick={registerHere} />
-        <Row icon="person" iconTint="var(--blue)" title={t('Sign in with passkey')} accessory="chevron" onClick={signInHere} />
-      </> : (
-        <Row icon="lock" iconTint="var(--grey)" title={t('Passkeys not supported in this browser.')} />
-      )}
+      </> : <Row icon="lock" iconTint="var(--acc)" title={t('All data stays on this device')} subtitle={t('No account or cloud sync — export a backup from Settings to keep a copy.')} />}
     </Section>
-    {!user && !DEMO && !MOBILE && <p className="sect-f" style={{ marginTop: -18, marginBottom: 22 }}>{t('Guest mode — data lives only in this browser.')}</p>}
-
-    {/* ---------- AI Coach & API Keys ---------- */}
-    {!MOBILE && <Section
-      title={t('AI Coach & API Keys')}
-      footer={
-        coachLocal?.mode === 'byok'
-          ? t('Using your personal API key. Direct HTTPS requests never leave this device unencrypted.')
-          : coachLocal?.mode === 'server'
-            ? t('Using instance-wide AI Coach configured on your SmiTriX server.')
-            : t('AI Coach designs personalized routines and reviews progress. Keys are stored safely on this device.')
-      }
-    >
-      <Row
-        icon="sparkles"
-        iconTint="var(--acc)"
-        title={t('AI Coach')}
-        accessory="chevron"
-        subtitle={
-          coachLocal?.mode === 'server'
-            ? t('Active · Runs on your SmiTriX server')
-            : coachLocal?.mode === 'byok'
-              ? (hasCoachKey || HTTP_PROVIDERS[coachLocal?.provider]?.keyOptional
-                  ? t('Active · {0}{1}', HTTP_PROVIDERS[coachLocal?.provider]?.label || coachLocal?.provider || 'BYOK', coachLocal?.model ? ` (${coachLocal.model})` : '')
-                  : t('Needs API key · {0}', HTTP_PROVIDERS[coachLocal?.provider]?.label || coachLocal?.provider || 'BYOK'))
-              : (user && config?.coach?.enabled)
-                ? t('Available via server · Tap to configure')
-                : t('Off — configure provider & API key')
-        }
-        onClick={() => nav('/coach/setup')}
-      />
-      <Row
-        icon="key"
-        iconTint="var(--teal)"
-        title={t('Manage API Keys')}
-        accessory="chevron"
-        subtitle={
-          (savedProviderCount > 0 && hasHevyKey)
-            ? t('{0} AI & Hevy keys saved', savedProviderCount)
-            : savedProviderCount > 0
-              ? t('{0} AI Coach {1} saved', savedProviderCount, savedProviderCount === 1 ? 'key' : 'keys')
-              : hasHevyKey
-                ? t('Hevy Pro key saved')
-                : t('Configure keys for AI Coach and Hevy')
-        }
-        onClick={() => useUI.getState().openSheet(close => <ApiKeyManagerSheet close={close} onUpdate={refreshApiKeys} />)}
-      />
-      {user?.admin && (
-        <Row
-          icon="wrench"
-          iconTint="var(--indigo)"
-          title={t('Server AI Coach settings')}
-          subtitle={t('Instance provider, rate limits and server setup')}
-          accessory="chevron"
-          onClick={() => nav('/admin')}
-        />
-      )}
-    </Section>}
 
     {/* ---------- general ---------- */}
     <Section title={t('General')} footer={t('Switching the unit offers to convert every stored weight.')}>
@@ -352,7 +236,7 @@ export default function Settings() {
       </Row>
     </Section>
 
-    {(user || (MOBILE && !IPHONE_PWA)) && <NotificationsCard S={S} update={update} toast={toast} />}
+    {MOBILE && !IPHONE_PWA && <NotificationsCard S={S} update={update} toast={toast} />}
 
     {/* ---------- equipment ---------- */}
     <EquipmentCard S={S} update={update} />
@@ -430,7 +314,7 @@ export default function Settings() {
     {!MOBILE && <Section title={t('Tip')}>
       <Row icon="lightbulb" iconTint="var(--yellow)"
         title={IS_ANDROID ? t('In Chrome: ⋮ menu → Add to Home screen') : t('In Safari: Share → Add to Home Screen')}
-        subtitle={t('to install SmiTriX as a full-screen app.') + ' ' + (user ? t('Your data syncs with your profile — sign in anywhere to see it.') : t('Guest data stays on this device — export a backup now and then!'))} />
+        subtitle={t('to install SmiTriX as a full-screen app.') + ' ' + t('Your data stays on this device — export a backup now and then!')} />
     </Section>}
 
     {/* The version, at the bottom of Settings — which is where the support template has been
@@ -541,8 +425,7 @@ function effortHelpSheet() {
 }
 
 function NotificationsCard({ S, update, toast }) {
-  if (MOBILE) return <MobileReminderCard S={S} update={update} toast={toast} />
-  return <PushCard S={S} update={update} toast={toast} />
+  return <MobileReminderCard S={S} update={update} toast={toast} />
 }
 
 // Mobile build: the reminder is a native local notification scheduled on planned weekdays —
@@ -614,62 +497,6 @@ function MobileReminderCard({ S, update, toast }) {
   )
 }
 
-function PushCard({ S, update, toast }) {
-  const [on, setOn] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const supported = pushSupported()
-
-  useEffect(() => {
-    if (!supported) return
-    navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => setOn(!!sub)).catch(() => {})
-  }, [supported])
-
-  const toggle = async v => {
-    setBusy(true)
-    try {
-      if (!v) { await disablePush(); setOn(false); toast(t('Notifications off')) }
-      else { await enablePush(); setOn(true); toast(t('Notifications on')) }
-    } catch (e) { toast(e.message || t('Could not change notification settings')) }
-    setBusy(false)
-  }
-  const test = async () => {
-    try { await sendTestPush(); toast(t('Test sent — should arrive any second')) }
-    catch (e) { toast(e.message || t('Test failed')) }
-  }
-
-  if (!supported) return (
-    <Section title={t('Notifications')}>
-      <Row icon="bellSlash" iconTint="var(--grey)" title={t('Not supported in this browser.')} />
-    </Section>
-  )
-
-  return <>
-    <Section
-      title={t('Notifications')}
-      footer={on && S.reminder?.on
-        ? t("Only sent on days you have a routine planned and haven't logged a workout yet.") +
-          (S.reminder?.tz ? ' ' + t('Timezone: {0} (auto-detected, updates if you travel).', S.reminder.tz) : '')
-        : null}
-    >
-      <Row icon="bell" iconTint="var(--red)" title={t('Push notifications')} subtitle={t('Rest-timer alerts, even if SmiTriX is closed.')}>
-        <Switch checked={on} disabled={busy} onChange={toggle} />
-      </Row>
-      {on && (
-        <Row icon="calendar" iconTint="var(--orange)" title={t('Workout day reminder')}>
-          <Switch checked={!!S.reminder?.on} onChange={() => update(s => { s.reminder = { ...(s.reminder || DEF.reminder), on: !s.reminder?.on, tz: localTZ() } })} />
-        </Row>
-      )}
-      {on && S.reminder?.on && (
-        <Row icon="clock" iconTint="var(--purple)" title={t('Reminder time')}>
-          <input type="time" className="timef" value={S.reminder?.time || DEF.reminder.time}
-            onChange={e => update(s => { s.reminder = { ...(s.reminder || DEF.reminder), time: e.target.value, tz: localTZ() } })} />
-        </Row>
-      )}
-    </Section>
-    {on && <div style={{ marginTop: -12, marginBottom: 22 }}><Button size="sm" icon="bell" onClick={test}>{t('Send test notification')}</Button></div>}
-  </>
-}
-
 // Equipment profiles ("Home", "Gym", ...) — each an id/name/eq-list; the active one filters
 // the Library, exercise picker, and flags routine entries that need something outside it
 // (see lib/equipment.js). Purely local/synced state — no server changes needed.
@@ -701,396 +528,4 @@ function EquipmentCard({ S, update }) {
   </Section>
 }
 
-// Lets the mobile app's "connect to my server" mode (lib/remote.js) authenticate without a
-// WebAuthn ceremony of its own — the code is minted here, from an already signed-in session,
-// and redeemed by the app for a bearer token. See /api/pair/create in api/server.js.
-function PairSheet({ close }) {
-  const [code, setCode] = useState(null)
-  const [err, setErr] = useState(null)
-  useEffect(() => { api('/api/pair/create', { method: 'POST', body: '{}' }).then(r => setCode(r.code)).catch(e => setErr(e.message || t('Could not generate a code'))) }, [])
-  return <>
-    <h3>{t('Pair the mobile app')}</h3>
-    <div className="muted small" style={{ marginBottom: 14 }}>
-      {t('On the SmiTriX app, choose “Connect to my server”, then enter this address and the code below. It expires in 5 minutes.')}
-    </div>
-    {err ? <div className="dim small">{err}</div> : (
-      <div className="card" style={{ textAlign: 'center', fontSize: 30, fontWeight: 700, letterSpacing: '.16em', padding: '18px 0' }}>
-        {code || '········'}
-      </div>
-    )}
-    <div style={{ height: 12 }} />
-    <Button onClick={close}>{t('Done')}</Button>
-  </>
-}
-
-// The same registration as the sign-in screen's, reached from Settings instead. It asks for
-// the invite code on the same terms: an invite-only instance rejects a registration without
-// one, so a form that cannot collect it is a form that cannot succeed.
-function RegisterInline({ close, setUser, pushState, pullState, toast }) {
-  const nameRef = useRef(null)
-  const [code, setCode] = useState('')
-  const [inviteOnly, setInviteOnly] = useState(false)
-  useEffect(() => { api('/api/config').then(c => setInviteOnly(!!c.invite_only)).catch(() => {}) }, [])
-  const go = async () => {
-    const n = (nameRef.current.value || '').trim()
-    if (!n) { toast(t('Enter a name')); return }
-    if (inviteOnly && !code.trim()) { toast(t('An invite code is required')); return }
-    try {
-      const u = await passkeyRegister(n, code.trim()); setUser(u); close()
-      if (hasData(useStore.getState().S)) { await pushState(); toast(t('Profile created — data moved into it')) }
-      else { await pullState(); toast(t('Welcome, {0}', u.name)) }
-    } catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast(e.message || t('Registration failed')) }
-  }
-  return <>
-    <h3>{t('Create your profile')}</h3>
-    <div className="muted small" style={{ marginBottom: 14 }}>{t('Pick a name, then confirm with your device.')}</div>
-    <TextField ref={nameRef} placeholder={t('Your name')} maxLength={40} />
-    {inviteOnly && <>
-      <div style={{ height: 10 }} />
-      <input className="input" placeholder={t('Invite code')} maxLength={40} value={code}
-        onChange={e => setCode(e.target.value.toUpperCase())} style={{ letterSpacing: '.14em', fontWeight: 600, textAlign: 'center' }} />
-      <div className="dim small" style={{ marginTop: 6 }}>{t('This app is invite-only — enter the code you were given.')}</div>
-    </>}
-    <div style={{ height: 12 }} /><Button variant="primary" onClick={go}>{t('Create passkey')}</Button>
-  </>
-}
-
-export function ApiKeyManagerSheet({ close, onUpdate }) {
-  const toast = useUI(s => s.toast)
-  const coachLocal = useStore(s => s.coachLocal)
-  const setCoachLocal = useStore(s => s.setCoachLocal)
-  const [tab, setTab] = useState('coach')
-
-  // Selected AI provider in the manager
-  const [selectedProvider, setSelectedProvider] = useState(coachLocal?.provider || 'anthropic')
-  const [baseUrl, setBaseUrl] = useState(coachLocal?.baseUrl || '')
-
-  // Coach key state
-  const [coachKey, setCoachKey] = useState('')
-  const [providerKeys, setProviderKeys] = useState({})
-  const [showCoachKey, setShowCoachKey] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState(null)
-
-  // Hevy key state
-  const [hevyKey, setHevyKey] = useState('')
-  const [hasHevyKey, setHasHevyKey] = useState(false)
-  const [showHevyKey, setShowHevyKey] = useState(false)
-  const [testingHevy, setTestingHevy] = useState(false)
-  const [hevyTestResult, setHevyTestResult] = useState(null)
-
-  const refreshProviderKeys = async () => {
-    const map = {}
-    for (const id of HTTP_PROVIDER_IDS) {
-      map[id] = !!(await getApiKey(id))
-    }
-    setProviderKeys(map)
-  }
-
-  useEffect(() => {
-    refreshProviderKeys()
-    getHevyApiKey().then(k => setHasHevyKey(!!k))
-  }, [])
-
-  const providerMeta = HTTP_PROVIDERS[selectedProvider] || {}
-  const hasCoachKey = !!providerKeys[selectedProvider]
-  const isActiveCoach = coachLocal?.mode === 'byok' && coachLocal?.provider === selectedProvider
-
-  const saveCoachKey = async () => {
-    if (!providerMeta.keyOptional && !coachKey.trim()) return
-    if (coachKey.trim()) {
-      await setApiKey(coachKey.trim(), selectedProvider)
-    }
-    if (selectedProvider === 'compatible') {
-      const v = validateBaseUrl(baseUrl)
-      if (!v.ok) { toast(v.error); return }
-      if (!v.value && !coachLocal?.baseUrl) { toast(t('Enter an endpoint URL')); return }
-      await setCoachLocal({ baseUrl: v.value || null, provider: 'compatible' })
-    }
-    setCoachKey('')
-    await refreshProviderKeys()
-    toast(t('AI Coach key saved ({0})', providerMeta.label))
-    onUpdate?.()
-  }
-
-  const removeCoachKey = async () => {
-    await clearApiKey(selectedProvider)
-    setCoachKey('')
-    setTestResult(null)
-    await refreshProviderKeys()
-    toast(t('AI Coach key removed ({0})', providerMeta.label))
-    onUpdate?.()
-  }
-
-  const activateProvider = async () => {
-    const v = validateBaseUrl(selectedProvider === 'compatible' ? (baseUrl || coachLocal?.baseUrl) : '')
-    if (!v.ok) return toast(v.error)
-    if (selectedProvider === 'compatible' && !v.value) {
-      return toast(t('Enter an endpoint URL first'))
-    }
-    const targetModel = providerMeta.defaultModel || (coachLocal?.provider === selectedProvider ? (coachLocal?.model || '') : '') || (testResult?.models?.[0] || '')
-    await setCoachLocal({
-      mode: 'byok',
-      provider: selectedProvider,
-      model: targetModel,
-      baseUrl: selectedProvider === 'compatible' ? (v.value || null) : null,
-    })
-    toast(t('{0} is now your active Coach', providerMeta.label))
-    onUpdate?.()
-  }
-
-  const testCoachConnection = async () => {
-    setTesting(true)
-    setTestResult(null)
-    const startMs = Date.now()
-    try {
-      const local = await import('../lib/coach-local.js')
-      const targetBase = selectedProvider === 'compatible' ? (baseUrl || coachLocal?.baseUrl) : null
-      const v = validateBaseUrl(targetBase)
-      if (!v.ok) {
-        setTestResult({ ok: false, message: v.error })
-        toast(v.error)
-        setTesting(false)
-        return
-      }
-      if (selectedProvider === 'compatible' && !v.value) {
-        setTestResult({ ok: false, message: t('Enter an endpoint URL for OpenAI-compatible') })
-        toast(t('Enter an endpoint URL'))
-        setTesting(false)
-        return
-      }
-      const k = coachKey.trim() || await getApiKey(selectedProvider)
-      if (!providerMeta.keyOptional && !k) {
-        toast(t('Enter an API key first'))
-        setTesting(false)
-        return
-      }
-      const r = await local.localModels({ provider: selectedProvider, baseUrl: v.value }, k)
-      const elapsed = Date.now() - startMs
-      if (r.ok) {
-        setTestResult({ ok: true, models: r.models, message: t('Connected! {0} models available ({1}ms)', r.models.length, elapsed) })
-        toast(t('Connection successful!'))
-      } else {
-        setTestResult({ ok: false, message: r.error || t('Could not reach provider') })
-        toast(r.error || t('Test failed'))
-      }
-    } catch (e) {
-      setTestResult({ ok: false, message: e.message || t('Connection error') })
-      toast(e.message || t('Connection error'))
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  const saveHevyKey = async () => {
-    if (!hevyKey.trim()) return
-    await setHevyApiKey(hevyKey.trim())
-    setHasHevyKey(true)
-    setHevyKey('')
-    toast(t('Hevy API key saved'))
-    onUpdate?.()
-  }
-
-  const removeHevyKey = async () => {
-    await clearHevyApiKey()
-    setHasHevyKey(false)
-    setHevyKey('')
-    setHevyTestResult(null)
-    toast(t('Hevy API key removed'))
-    onUpdate?.()
-  }
-
-  const testHevyConnection = async () => {
-    setTestingHevy(true)
-    setHevyTestResult(null)
-    try {
-      const k = hevyKey.trim() || await getHevyApiKey()
-      if (!k) {
-        toast(t('Enter an API key first'))
-        setTestingHevy(false)
-        return
-      }
-      const r = await testHevyApiKey(k)
-      if (r.ok) {
-        setHevyTestResult({ ok: true, message: t('Connected to Hevy API successfully!') })
-        toast(t('Hevy connection successful!'))
-      } else if (r.error === 'auth') {
-        setHevyTestResult({ ok: false, message: t('API key was refused by Hevy (401/403)') })
-        toast(t('Hevy API key refused'))
-      } else {
-        setHevyTestResult({ ok: false, message: r.error || t('Connection error') })
-        toast(t('Test failed: {0}', r.error || 'error'))
-      }
-    } catch (e) {
-      setHevyTestResult({ ok: false, message: e.message || t('Connection error') })
-      toast(e.message || t('Connection error'))
-    } finally {
-      setTestingHevy(false)
-    }
-  }
-
-  return <>
-    <h3>{t('Manage API Keys')}</h3>
-    <div className="muted small" style={{ marginBottom: 14 }}>
-      {t('Keys are stored securely on this device and are only used for direct requests.')}
-    </div>
-
-    <Segmented
-      className="seg-inline"
-      style={{ marginBottom: 16 }}
-      options={[
-        { value: 'coach', label: t('AI Coach'), icon: 'sparkles' },
-        { value: 'hevy', label: t('Hevy Pro'), icon: 'key' },
-      ]}
-      value={tab}
-      onChange={setTab}
-    />
-
-    {tab === 'coach' ? (
-      <div>
-        <div className="row" style={{ flexWrap: 'wrap', gap: 7, marginBottom: 14 }}>
-          {HTTP_PROVIDER_IDS.map(id => (
-            <button
-              key={id}
-              className={'chip' + (id === selectedProvider ? ' on' : '')}
-              onClick={() => {
-                setSelectedProvider(id)
-                setCoachKey('')
-                setTestResult(null)
-              }}
-            >
-              {HTTP_PROVIDERS[id].label}
-              {providerKeys[id] && <span className="adm-chip-key" style={{ marginLeft: 5 }}>✓</span>}
-            </button>
-          ))}
-        </div>
-
-        <div className="row between" style={{ marginBottom: 8, alignItems: 'center' }}>
-          <span className="small bold">{providerMeta.label || 'AI Provider'}</span>
-          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-            {hasCoachKey && <span className="adm-pill ok">✓ {t('Saved')}</span>}
-            {isActiveCoach && <span className="adm-pill info">{t('Active Coach')}</span>}
-          </div>
-        </div>
-
-        {providerMeta.baseUrl && (
-          <div style={{ marginBottom: 10 }}>
-            <label className="small dim" style={{ display: 'block', marginBottom: 4 }}>{t('Endpoint URL')}</label>
-            <TextField
-              value={baseUrl}
-              placeholder="http://localhost:11434  or  https://openrouter.ai/api"
-              inputMode="url"
-              autoCapitalize="none"
-              autoCorrect="off"
-              onChange={e => setBaseUrl(e.target.value)}
-            />
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-          <TextField
-            type={showCoachKey ? 'text' : 'password'}
-            value={coachKey}
-            placeholder={hasCoachKey ? '••••••••  ' + t('(saved — enter new to replace)') : (providerMeta.keyPlaceholder || 'sk-…')}
-            autoCapitalize="none"
-            autoCorrect="off"
-            onChange={e => setCoachKey(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <Button
-            variant="tinted"
-            icon={showCoachKey ? 'eyeSlash' : 'eye'}
-            onClick={() => setShowCoachKey(!showCoachKey)}
-            aria-label={showCoachKey ? t('Hide key') : t('Show key')}
-          />
-        </div>
-
-        <div className="small dim" style={{ marginBottom: 12 }}>
-          {hasCoachKey
-            ? <span style={{ color: 'var(--green)', fontWeight: 600 }}>✓ {t('API key saved for {0}', providerMeta.label)}</span>
-            : providerMeta.keyOptional
-              ? t('Optional for local models (e.g. Ollama)')
-              : t('Required for {0}', providerMeta.label)}
-        </div>
-
-        {testResult && (
-          <div className={'adm-result ' + (testResult.ok ? 'ok' : 'bad')} style={{ marginBottom: 10 }}>
-            <b>{testResult.ok ? t('Passed') : t('Failed')}:</b> {testResult.message}
-          </div>
-        )}
-
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          {(coachKey.trim() || (providerMeta.keyOptional && baseUrl !== (coachLocal?.baseUrl || ''))) && (
-            <Button variant="primary" icon="check" onClick={saveCoachKey}>{t('Save key')}</Button>
-          )}
-          <Button
-            variant="tinted"
-            icon="sparkles"
-            disabled={testing || (!providerMeta.keyOptional && !hasCoachKey && !coachKey.trim())}
-            onClick={testCoachConnection}
-          >
-            {testing ? t('Testing…') : t('Test connection')}
-          </Button>
-          {!isActiveCoach && (hasCoachKey || providerMeta.keyOptional) && (
-            <Button variant="tinted" icon="sparkles" onClick={activateProvider}>{t('Use for AI Coach')}</Button>
-          )}
-          {hasCoachKey && (
-            <Button danger icon="trash" onClick={removeCoachKey}>{t('Remove key')}</Button>
-          )}
-        </div>
-        <div className="dim small" style={{ marginTop: 12, lineHeight: 1.5 }}>
-          {t('Used for AI plan design and workout debriefs. Direct HTTPS to {0}.', providerMeta.label || 'provider')}
-        </div>
-      </div>
-    ) : (
-      <div>
-        <div className="row between" style={{ marginBottom: 8, alignItems: 'center' }}>
-          <span className="small bold">{t('Hevy Pro API key')}</span>
-          {hasHevyKey && <span className="adm-pill ok">✓ {t('Saved')}</span>}
-        </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          <TextField
-            type={showHevyKey ? 'text' : 'password'}
-            value={hevyKey}
-            placeholder={hasHevyKey ? '••••••••  ' + t('(saved — enter new to replace)') : 'api-key-…'}
-            autoCapitalize="none"
-            autoCorrect="off"
-            onChange={e => setHevyKey(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <Button
-            variant="tinted"
-            icon={showHevyKey ? 'eyeSlash' : 'eye'}
-            onClick={() => setShowHevyKey(!showHevyKey)}
-            aria-label={showHevyKey ? t('Hide key') : t('Show key')}
-          />
-        </div>
-
-        {hevyTestResult && (
-          <div className={'adm-result ' + (hevyTestResult.ok ? 'ok' : 'bad')} style={{ marginBottom: 10 }}>
-            <b>{hevyTestResult.ok ? t('Passed') : t('Failed')}:</b> {hevyTestResult.message}
-          </div>
-        )}
-
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-          {hevyKey.trim() && (
-            <Button variant="primary" icon="check" onClick={saveHevyKey}>{t('Save key')}</Button>
-          )}
-          <Button variant="tinted" icon="sparkles" disabled={testingHevy || (!hasHevyKey && !hevyKey.trim())} onClick={testHevyConnection}>
-            {testingHevy ? t('Testing…') : t('Test connection')}
-          </Button>
-          {hasHevyKey && (
-            <Button danger icon="trash" onClick={removeHevyKey}>{t('Remove key')}</Button>
-          )}
-        </div>
-        <div className="dim small" style={{ marginTop: 12, lineHeight: 1.5 }}>
-          {t('Saved key is auto-used in Settings → Import from Hevy so you don’t have to re-enter it.')}{' '}
-          <a href="https://hevy.com/settings?developer" target="_blank" rel="noopener noreferrer">{t('Get your key on hevy.com')}</a>
-        </div>
-      </div>
-    )}
-
-    <div style={{ height: 12 }} />
-  </>
-}
 

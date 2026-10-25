@@ -26,7 +26,7 @@ import { announceWorkoutComplete } from './lib/voice.js'
 import { exerciseMuscleSnapshot, loadOfWorkouts, MUSCLES, MUSCLE_NAME, normalizeMuscleGroups, hasExplicitMuscleMetadata, musclesOf } from './lib/muscles.js'
 import { parseImport, mergeImport } from './lib/import-csv.js'
 import { importHevyData, HevyApiError, HEVY_DEV_SETTINGS, mergeHevyRoutines } from './lib/import-hevy.js'
-import { getHevyApiKey, setHevyApiKey } from './lib/coach-secrets.js'
+import { getHevyApiKey, setHevyApiKey } from './lib/hevy-secrets.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
 import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { exerciseHistory } from './lib/exercise-history.js'
@@ -2591,4 +2591,5 @@ function doFinishWorkout() {
   announceWorkoutComplete(st.voiceCoach, prs.length + e1prs.length)
   ui().openSheet(close => <FinishSummary w={w} prs={prs} e1prs={e1prs} close={close} />, { kind: 'center', locked: true })
 }
+
 
