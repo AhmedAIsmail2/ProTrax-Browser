@@ -345,14 +345,16 @@ export function initReminderSync(getState) {
 export async function shareExport(json, filename) {
   if (IPHONE_PWA) {
     const file = new File([json], filename, { type: 'application/json' })
-    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-      await navigator.share({ files: [file], title: filename })
-      return
-    }
     const url = URL.createObjectURL(file)
     const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    a.href = url
+    a.download = filename
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Keep the object URL alive long enough for Safari to start the download.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
     return
   }
   const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
@@ -378,3 +380,4 @@ export async function writeAutoBackup(state) {
     })
   } catch (e) { /* best effort — the private mirror in Directory.Data still has the data */ }
 }
+
