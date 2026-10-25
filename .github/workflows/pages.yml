@@ -1,4 +1,4 @@
-# Publishes the SmiTriX website and live demo to GitHub Pages: https://smitronix.github.io/SmiTriX/
+# Publishes the iPhone local-first app at the root of this GitHub Pages site.
 name: Deploy website to GitHub Pages
 
 on:
@@ -42,18 +42,13 @@ jobs:
           VITE_IMG_BASE: ${{ env.DATASET }}/images/
           VITE_GIF_BASE: ${{ env.DATASET }}/videos/
 
-      - name: Stage website with local-first app
-        run: |
-          rm -rf website/demo
-          cp -r frontend/dist-iphone website/demo
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: website
+          path: frontend/dist-iphone
 
   deploy:
     needs: build
