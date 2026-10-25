@@ -16,6 +16,12 @@ const media = process.env.MEDIA_TARGET || 'http://127.0.0.1:8888'
 // Set for the public instance: VITE_UMAMI_SRC=https://stats.example/script.js VITE_UMAMI_ID=<uuid>
 const umamiSrc = process.env.VITE_UMAMI_SRC
 const umamiId = process.env.VITE_UMAMI_ID
+// Android, the iPhone PWA, and the GitHub Pages demo are local-only apps. Keep
+// server account/sync code available to the self-hosted desktop build, but let
+// Rollup remove it entirely from these static/native bundles.
+const localOnlyBuild = process.env.VITE_MOBILE === '1'
+  || process.env.VITE_IPHONE_PWA === '1'
+  || process.env.VITE_DEMO === '1'
 
 const umami = {
   name: 'smitrix-umami',
@@ -35,7 +41,10 @@ const umami = {
 const pkgVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
 
 export default defineConfig({
-  define: { __APP_VERSION__: JSON.stringify(pkgVersion) },
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+    __LOCAL_ONLY_BUILD__: JSON.stringify(localOnlyBuild),
+  },
   plugins: [react(), umami],
   base: './',
   server: {
