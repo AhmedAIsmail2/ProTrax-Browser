@@ -16,6 +16,7 @@ import { starterPlanSheet, confirmSheet, importFromApp, importHubSheet, equipmen
 import { openTutorial } from '../components/TutorialDialog.jsx'
 import { startAppUpdate } from '../components/UpdateDialog.jsx'
 import Icon from '../components/Icon.jsx'
+import BrandName from '../components/BrandName.jsx'
 import { Section, Row, SelectRow, Switch, Segmented, Button, TextField } from '../components/ui.jsx'
 import { playRestChime } from '../lib/sound.js'
 
@@ -100,7 +101,7 @@ export default function Settings() {
     rd.onload = () => {
       try {
         const data = JSON.parse(rd.result)
-        if (!data.workouts || !data.routines) throw new Error('not a SmiTriX backup')
+        if (!data.workouts || !data.routines) throw new Error('not a ProTraX backup')
         confirmSheet({ title: t('Import backup?'), message: t('This replaces all current data with the backup file.'), confirmText: t('Import'), danger: true, onConfirm: () => { replaceState(Object.assign(JSON.parse(JSON.stringify(DEF)), data), true); toast(t('Backup imported')) } })
       } catch (e) { toast(t('Import failed: {0}', e.message)) }
     }
@@ -219,7 +220,7 @@ export default function Settings() {
           if (v && !S.voiceCoach) {
             confirmSheet({
               title: t('Enable voice coach?'),
-              message: t("SmiTriX will speak rest countdowns, set announcements, and workout achievements using your device's voice. You can turn this off anytime."),
+              message: t("ProTraX will speak rest countdowns, set announcements, and workout achievements using your device's voice. You can turn this off anytime."),
               confirmText: t('Turn on'),
               onConfirm: () => update(s => { s.voiceCoach = true }),
             })
@@ -284,7 +285,7 @@ export default function Settings() {
     {/* ---------- help & guide ---------- */}
     <Section title={t('Help & Guide')}>
       <Row icon="lightbulb" iconTint="var(--yellow)"
-        title={t('How SmiTriX works (App Tour)')}
+        title={t('How ProTraX works (App Tour)')}
         subtitle={t('Step-by-step visual guide to routines, workouts, rest timer & stats')}
         accessory="chevron"
         onClick={() => openTutorial(0)} />
@@ -292,7 +293,7 @@ export default function Settings() {
 
     {/* ---------- data: fill it, bring things over, back it up, wipe it ---------- */}
     <Section title={t('Data')}>
-      {MOBILE && updateInfo?.hasUpdate && updateInfo.apkUrl && <Row icon="info" iconTint="var(--purple)" title={t('SmiTriX v{0} available', updateInfo.latestVersion)}
+      {MOBILE && updateInfo?.hasUpdate && updateInfo.apkUrl && <Row icon="info" iconTint="var(--purple)" title={t('ProTraX v{0} available', updateInfo.latestVersion)}
         accessory="chevron"
         onClick={onUpdateRowClick} />}
       <Row icon="sparkles" iconTint="var(--acc)" title={t('Load starter plan')} accessory="chevron" onClick={starterPlanSheet} />
@@ -316,7 +317,7 @@ export default function Settings() {
     {!MOBILE && <Section title={t('Tip')}>
       <Row icon="lightbulb" iconTint="var(--yellow)"
         title={IS_ANDROID ? t('In Chrome: ⋮ menu → Add to Home screen') : t('In Safari: Share → Add to Home Screen')}
-        subtitle={t('to install SmiTriX as a full-screen app.') + ' ' + t('Your data stays on this device — export a backup now and then!')} />
+        subtitle={t('to install ProTraX as a full-screen app.') + ' ' + t('Your data stays on this device — export a backup now and then!')} />
     </Section>}
 
     {/* The version, at the bottom of Settings — which is where the support template has been
@@ -324,7 +325,7 @@ export default function Settings() {
         address bar and no about box, so without this there is no way to tell which build you
         are running, or whether an update actually installed. */}
     <div className="dim small" style={{ textAlign: 'center', marginTop: 4, lineHeight: 1.6 }}>
-      SmiTriX v{__APP_VERSION__} · {t('free & open source (AGPL v3)')}<br />
+      <BrandName /> v{__APP_VERSION__} · {t('free & open source (AGPL v3)')}<br />
       exercise data: hasaneyldrm/exercises-dataset (MIT)<br />
       exercise images and animations © <a href="https://gymvisual.com/" target="_blank" rel="noopener">Gym visual</a>
     </div>

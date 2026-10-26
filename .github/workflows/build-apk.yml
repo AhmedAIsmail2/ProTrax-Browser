@@ -53,7 +53,7 @@ jobs:
           npm run build:mobile
           APP_VER=$(node -p "require('./package.json').version")
           echo "APP_VERSION=$APP_VER" >> $GITHUB_ENV
-          echo "Building SmiTriX mobile v$APP_VER"
+          echo "Building ProTraX mobile v$APP_VER"
 
       - name: Make Gradlew Executable
         run: |
@@ -91,67 +91,48 @@ jobs:
           # 1. Zipalign the unsigned APK
           "$ZIPALIGN" -f -p 4 "$UNSIGNED" "aligned.apk"
 
-          # 2. Check if user configured secret keystore, else use persistent repository release keystore
-          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
-            echo "Signing with provided ANDROID_KEYSTORE_BASE64 secret..."
-            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-            KEYSTORE="release.keystore"
-            KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
-            KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
-          elif [ -f "frontend/android/smitrix-release.keystore" ]; then
-            echo "Using persistent repository release keystore..."
-            KEYSTORE="frontend/android/smitrix-release.keystore"
-            KS_PASS="smitrix_release_key"
-            KEY_ALIAS="smitrix"
-          else
-            echo "Generating fallback release signing key..."
-            keytool -genkeypair -v \
-              -keystore release.keystore \
-              -alias smitrix \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "smitrix_release_key" \
-              -keypass "smitrix_release_key" \
-              -dname "CN=SmiTriX, OU=Mobile, O=SmitroniX, L=Mumbai, ST=Maharashtra, C=IN"
-            KEYSTORE="release.keystore"
-            KS_PASS="smitrix_release_key"
-            KEY_ALIAS="smitrix"
+          # The former repository signing key was public. Only repository secrets are accepted.
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ] || [ -z "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" ] || [ -z "${{ secrets.ANDROID_KEY_ALIAS }}" ]; then
+            echo "ERROR: Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_ALIAS repository secrets."
+            exit 1
           fi
-
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          KEYSTORE="release.keystore"
+          KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}"
           # 3. Sign the APK
           "$APKSIGNER" sign \
             --ks "$KEYSTORE" \
             --ks-pass "pass:$KS_PASS" \
             --ks-key-alias "$KEY_ALIAS" \
             --key-pass "pass:$KS_PASS" \
-            --out "SmiTriX-${APP_VERSION}.apk" \
+            --out "ProTraX-${APP_VERSION}.apk" \
             aligned.apk
 
           # 4. Verify signature
-          "$APKSIGNER" verify --verbose --print-certs "SmiTriX-${APP_VERSION}.apk"
+          "$APKSIGNER" verify --verbose --print-certs "ProTraX-${APP_VERSION}.apk"
 
           # 5. Checksums and generic named copy for direct download links
-          sha256sum "SmiTriX-${APP_VERSION}.apk" > "SmiTriX-${APP_VERSION}.apk.sha256"
-          cp "SmiTriX-${APP_VERSION}.apk" "SmiTriX.apk"
-          sha256sum "SmiTriX.apk" > "SmiTriX.apk.sha256"
-          APK_HASH=$(cut -d' ' -f1 "SmiTriX.apk.sha256")
+          sha256sum "ProTraX-${APP_VERSION}.apk" > "ProTraX-${APP_VERSION}.apk.sha256"
+          cp "ProTraX-${APP_VERSION}.apk" "ProTraX.apk"
+          sha256sum "ProTraX.apk" > "ProTraX.apk.sha256"
+          APK_HASH=$(cut -d' ' -f1 "ProTraX.apk.sha256")
           echo "APK_SHA256=$APK_HASH" >> $GITHUB_ENV
 
           # Cleanup temporary build files from runner
           rm -f release.keystore aligned.apk
 
-          echo "Signed APK successfully created: SmiTriX-${APP_VERSION}.apk (SHA-256: $APK_HASH)"
+          echo "Signed APK successfully created: ProTraX-${APP_VERSION}.apk (SHA-256: $APK_HASH)"
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: smitrix-android-apk
           path: |
-            SmiTriX-*.apk
-            SmiTriX-*.apk.sha256
-            SmiTriX.apk
-            SmiTriX.apk.sha256
+            ProTraX-*.apk
+            ProTraX-*.apk.sha256
+            ProTraX.apk
+            ProTraX.apk.sha256
           retention-days: 30
 
       - name: Upload APK to GitHub Release
@@ -159,15 +140,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.APP_VERSION) }}
-          name: SmiTriX v${{ env.APP_VERSION }}
+          name: ProTraX v${{ env.APP_VERSION }}
           body: |
             ### Downloads
-            - **Signed APK**: [SmiTriX.apk](https://github.com/SmitroniX/SmiTriX/releases/download/${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.APP_VERSION) }}/SmiTriX.apk)
-            - **Versioned APK**: [SmiTriX-${{ env.APP_VERSION }}.apk](https://github.com/SmitroniX/SmiTriX/releases/download/${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.APP_VERSION) }}/SmiTriX-${{ env.APP_VERSION }}.apk)
+            - **Signed APK**: [ProTraX.apk](https://github.com/AhmedAIsmail2/SmiTriX-iPhone/releases/download/${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.APP_VERSION) }}/ProTraX.apk)
+            - **Versioned APK**: [ProTraX-${{ env.APP_VERSION }}.apk](https://github.com/AhmedAIsmail2/SmiTriX-iPhone/releases/download/${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', env.APP_VERSION) }}/ProTraX-${{ env.APP_VERSION }}.apk)
             - **SHA-256 Checksum**: `${{ env.APK_SHA256 }}`
           files: |
-            SmiTriX-${{ env.APP_VERSION }}.apk
-            SmiTriX-${{ env.APP_VERSION }}.apk.sha256
-            SmiTriX.apk
-            SmiTriX.apk.sha256
+            ProTraX-${{ env.APP_VERSION }}.apk
+            ProTraX-${{ env.APP_VERSION }}.apk.sha256
+            ProTraX.apk
+            ProTraX.apk.sha256
           generate_release_notes: true

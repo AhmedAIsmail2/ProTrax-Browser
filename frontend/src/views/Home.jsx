@@ -17,6 +17,7 @@ import ActivityHeatmap from '../components/ActivityHeatmap.jsx'
 import RecoveryMap from '../components/RecoveryMap.jsx'
 import PRWall from '../components/PRWall.jsx'
 import { LB_TO_KG } from '../lib/recovery.js'
+import BrandName from '../components/BrandName.jsx'
 
 function formatElapsed(start) {
   if (!start) return '0:00'
@@ -132,7 +133,7 @@ export default function Home() {
 
   return <div className="narrow">
     <div className="hdr home-sticky-header">
-      <div><h1>{user ? t('Hi {0}', user.name) : 'SmiTriX'}</h1><div className="sub">{today.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
+      <div><h1>{user ? t('Hi {0}', user.name) : <BrandName />}</h1><div className="sub">{today.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
       <div className="row" style={{ gap: 6 }}>
         <button className="iconbtn" onClick={() => openTutorial(0)} aria-label={t('Tutorial & Guide')} title={t('Tutorial & Guide')}><Icon name="help" /></button>
         <button className="iconbtn" onClick={() => nav('/settings')} aria-label={t('Settings')}><Icon name="gear" /></button>
@@ -323,7 +324,7 @@ export default function Home() {
         </div>
         <div className="muted small" style={{ marginBottom: 12 }}>{t('Set up your weekly routine to get going — or load a ready-made starter plan.')}</div>
         <Button variant="primary" icon="sparkles" onClick={starterPlanSheet}>{t('Load starter plan')}</Button>
-        <div style={{ height: 8 }} /><Button icon="lightbulb" onClick={() => openTutorial(0)}>{t('How SmiTriX works (Tour)')}</Button>
+        <div style={{ height: 8 }} /><Button icon="lightbulb" onClick={() => openTutorial(0)}>{t('How ProTraX works (Tour)')}</Button>
         <div style={{ height: 8 }} /><Button onClick={() => nav('/plan')}>{t('Build my own plan')}</Button>
       </div>
     )}

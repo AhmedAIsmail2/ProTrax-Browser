@@ -99,3 +99,13 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+
+# Private ProTraX release signing material
+*.keystore
+.protrax-release-password
+
+
+# Private ProTraX release signing material
+*.keystore
+.protrax-release-password
+
