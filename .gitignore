@@ -8,6 +8,7 @@ data/
 # Local config
 .env
 smitrix-backup-*.json
+protrax-backup-*.json
 .idea/
 
 # Build output / deps
