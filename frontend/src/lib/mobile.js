@@ -335,7 +335,7 @@ export async function writeAutoBackup(state) {
   try {
     const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
     await Filesystem.writeFile({
-      path: `smitrix-backup-${todayISO()}.json`,
+      path: `protrax-backup-${todayISO()}.json`,
       directory: Directory.Documents,
       data: JSON.stringify(state),
       encoding: Encoding.UTF8,
