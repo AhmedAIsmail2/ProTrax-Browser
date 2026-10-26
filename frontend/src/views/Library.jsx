@@ -33,27 +33,28 @@ export default function Library() {
     return matchesMuscleGroup(e, bp)
   }
 
-  const matchesEquipment = e => {
+  const matchesEquipmentPreset = e => {
     if (eqQuick) {
       const preset = QUICK_EQ_PRESETS.find(p => p.id === eqQuick)
       if (preset?.match && !preset.match(e.eq)) return false
     }
-    if (eq && e.eq !== eq) return false
     return true
   }
 
-  const base = allExercises(S).filter(e => inScope(e) && matchesEquipment(e) && matchExercise(e, q))
+  // Keep the option row based on current body/search/quick filters, but not the selected equipment chip.
+  const base = allExercises(S).filter(e => inScope(e) && matchesEquipmentPreset(e) && matchExercise(e, q))
   const eqFiltered = (profile && !showAll) ? base.filter(e => exAvailable(S, e)) : base
   const eqOpts = equipmentOf(eqFiltered)
   // Drop the equipment filter if the search narrowed it away, so you never hit a dead end.
   const eqOn = eqOpts.includes(eq) ? eq : ''
+  const filtered = eqOn ? eqFiltered.filter(e => e.eq === eqOn) : eqFiltered
 
   // Favourites float to the top; when searching, sort by smart relevance score
-  const f = q ? [...(eqOn ? eqFiltered.filter(e => e.eq === eqOn) : eqFiltered)].sort((a, b) => {
+  const f = q ? [...filtered].sort((a, b) => {
     const sB = scoreExercise(b, q, usage, isFav(S, b.id))
     const sA = scoreExercise(a, q, usage, isFav(S, a.id))
     return sB - sA || (usage[b.id] || 0) - (usage[a.id] || 0) || exerciseNameFor(a).localeCompare(exerciseNameFor(b))
-  }) : sortFavouritesFirst(eqOn ? eqFiltered.filter(e => e.eq === eqOn) : eqFiltered, S)
+  }) : sortFavouritesFirst(filtered, S)
 
   const favCount = (S.favEx || []).length
   useRevealActiveChip(bpStrip, bp)
@@ -122,8 +123,8 @@ export default function Library() {
       <button type="button" className={'chip' + (bp === 'shoulders' ? ' on' : '')} onClick={() => { setBp(b => b === 'shoulders' ? '' : 'shoulders'); setEq(''); setShown(40) }}>{t('shoulders')}</button>
       <button type="button" className={'chip' + (bp === 'arms' ? ' on' : '')} onClick={() => { setBp(b => b === 'arms' ? '' : 'arms'); setEq(''); setShown(40) }}>{t('arms')}</button>
       <button type="button" className={'chip' + (bp === 'core' ? ' on' : '')} onClick={() => { setBp(b => b === 'core' ? '' : 'core'); setEq(''); setShown(40) }}>{t('core')}</button>
-      {BODYPARTS.filter(b => !['chest', 'back', 'upper legs', 'lower legs', 'shoulders', 'upper arms', 'lower arms', 'waist'].includes(b)).map(b => (
-        <button key={b} type="button" className={'chip' + (bp === b ? ' on' : '')} onClick={() => { setBp(b => b === b ? '' : b); setShown(40) }}>{t(b)}</button>
+      {BODYPARTS.filter(group => !['chest', 'back', 'upper legs', 'lower legs', 'shoulders', 'upper arms', 'lower arms', 'waist'].includes(group)).map(group => (
+        <button key={group} type="button" className={'chip' + (bp === group ? ' on' : '')} onClick={() => { setBp(current => current === group ? '' : group); setShown(40) }}>{t(group)}</button>
       ))}
     </div>
 
