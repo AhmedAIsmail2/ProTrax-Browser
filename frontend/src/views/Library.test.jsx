@@ -5,7 +5,7 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Library from './Library.jsx'
-import { EXDB } from '../lib/exercises.js'
+import { EXDB, BODYPARTS, allExercises } from '../lib/exercises.js'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -64,5 +64,37 @@ describe('Library favourites', () => {
     const shown = names(host)
     expect(shown[0]).toBe(chest[4].n)
     expect(shown).not.toContain(legs.n)
+  })
+})
+
+describe('Library filters', () => {
+  it.each(['cardio', 'full body', 'neck'])('filters the %s body-part chip', group => {
+    expect(BODYPARTS).toContain(group)
+    const host = render()
+    const chip = [...host.querySelectorAll('.chips .chip')].find(button => button.textContent.trim().toLowerCase() === group)
+    expect(chip).toBeTruthy()
+
+    act(() => chip.click())
+
+    const expected = allExercises(mocks.S).filter(ex => ex.bp === group).slice(0, 40).map(ex => ex.n)
+    expect(chip.classList.contains('on')).toBe(true)
+    expect(names(host)).toEqual(expected)
+  })
+
+  it('keeps the equipment options visible after selecting one', () => {
+    const host = render()
+    const optionRow = () => [...host.querySelectorAll('.chips')].find(row =>
+      [...row.querySelectorAll('.chip')].some(button => button.textContent.trim() === 'Any equipment'))
+    const before = optionRow()
+    const dumbbell = [...before.querySelectorAll('.chip')].find(button => button.textContent.trim() === 'dumbbell')
+    expect(dumbbell).toBeTruthy()
+
+    act(() => dumbbell.click())
+
+    const after = optionRow()
+    expect(after).toBeTruthy()
+    expect([...after.querySelectorAll('.chip')].some(button => button.textContent.trim() === 'barbell')).toBe(true)
+    expect([...after.querySelectorAll('.chip')].find(button => button.textContent.trim() === 'dumbbell').classList.contains('on')).toBe(true)
+    expect(names(host)).toEqual(allExercises(mocks.S).filter(ex => ex.eq === 'dumbbell').slice(0, 40).map(ex => ex.n))
   })
 })
