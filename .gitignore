@@ -17,6 +17,21 @@ node_modules/
 *.log
 .DS_Store
 node_modules
+.gradle-user-home/
+.android-user-home/
+frontend/.gradle-user-home/
+frontend/.android-user-home/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/capacitor-cordova-android-plugins/build/
+frontend/android/outputs/
+*.apk
+*.aab
+*.idsig
+*.keystore
+*.jks
+.protrax-release-password
 .claude/
 .agents/
 
@@ -25,4 +40,3 @@ junit.xml
 coverage/
 frontend/bundle-size.json
 brag-output/
-
