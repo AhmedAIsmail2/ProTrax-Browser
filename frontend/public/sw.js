@@ -1,6 +1,6 @@
-/* SmiTriX service worker — runtime caching (works with Vite's hashed asset names).
+/* ProTraX service worker — runtime caching (works with Vite's hashed asset names).
    Media (img/gif) cache-first; everything else network-first with offline fallback. */
-const CACHE = 'smitrix-rt-v1'
+const CACHE = 'protrax-rt-v2'
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', e => {
@@ -10,11 +10,11 @@ self.addEventListener('activate', e => {
 })
 self.addEventListener('push', e => {
   const data = e.data ? e.data.json() : {}
-  e.waitUntil(self.registration.showNotification(data.title || 'SmiTriX', {
+  e.waitUntil(self.registration.showNotification(data.title || 'ProTraX', {
     body: data.body || '',
     icon: 'icon-512.png',
-    badge: 'icon-180.png',
-    tag: data.tag || 'smitrix',
+    badge: 'icon-192.png',
+    tag: data.tag || 'protrax',
     renotify: true
   }))
 })
