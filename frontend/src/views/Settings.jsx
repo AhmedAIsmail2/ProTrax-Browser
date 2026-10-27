@@ -214,21 +214,6 @@ export default function Settings() {
       <Row icon="volume" iconTint="var(--pink)" title={t('Preview chime')} subtitle={t('Test the selected rest timer chime')}>
         <Button size="sm" icon="play" onClick={() => playRestChime(S.restChime || 'bell', true)}>{t('Test chime')}</Button>
       </Row>
-      <Row icon="mic" iconTint="var(--teal)" title={t('Voice coach')}
-        subtitle={t('Spoken rest countdown and set announcements')}>
-        <Switch checked={!!S.voiceCoach} onChange={v => {
-          if (v && !S.voiceCoach) {
-            confirmSheet({
-              title: t('Enable voice coach?'),
-              message: t("ProTraX will speak rest countdowns, set announcements, and workout achievements using your device's voice. You can turn this off anytime."),
-              confirmText: t('Turn on'),
-              onConfirm: () => update(s => { s.voiceCoach = true }),
-            })
-          } else {
-            update(s => { s.voiceCoach = v })
-          }
-        }} />
-      </Row>
       <Row icon="sun" iconTint="var(--yellow)" title={t('Flash screen when timer ends')}>
         <Switch checked={!!S.timerFlash} onChange={v => update(s => { s.timerFlash = v })} />
       </Row>
@@ -530,5 +515,6 @@ function EquipmentCard({ S, update }) {
     <Row icon="plus" iconTint="var(--acc)" title={t('Add equipment profile')} accessory="chevron" onClick={() => equipmentProfileSheet(null)} />
   </Section>
 }
+
 
 

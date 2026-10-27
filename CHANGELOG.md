@@ -4,6 +4,7 @@
 
 - Removed the unused AI Coach and Voice Coach integrations, direct Hevy API import, and Portuguese localization, including their source files, tests, translations, and setup documentation.
 - Kept Hevy CSV import and improved weight/repetition number visibility on narrow workout screens.
+- Enter/Done now closes the keyboard across one-line fields without moving focus; fixed sharing the workout summary card.
 - Updated GitHub Pages to publish the local-first app at `/demo/` and redirect the site root to it.
 
 ## v1.5.0 — 2026-10-18

@@ -3,7 +3,6 @@ import { uid } from '../lib/format.js'
 import { beep, vibrate, playRestChime } from '../lib/sound.js'
 import { t } from '../lib/i18n.js'
 import { useStore } from './useStore.js'
-import { announceRest, announceRestCountdown, announceRestDone, cancelSpeech } from '../lib/voice.js'
 import { showRestTimerNotification, cancelRestTimerNotification } from '../lib/mobile.js'
 
 const notificationsSupported = () => typeof window !== 'undefined' && 'Notification' in window
@@ -103,7 +102,6 @@ export const useUI = create((set, get) => ({
     set({ timer: { left: sec, total: sec, endsAt, forIdx } })
     requestRestNotificationPermission()
     showRestTimerNotification(sec)
-    announceRest(useStore.getState().S.voiceCoach, sec)
     timerTick = () => {
       const tm = get().timer
       if (!tm) return
@@ -118,7 +116,6 @@ export const useUI = create((set, get) => ({
           playRestChime(chime, snd)
           vibrate([200, 100, 200]); get().flashTimer()
         }
-        announceRestDone(useStore.getState().S.voiceCoach)
         // The toast stays even when the rest ran out while the app was hidden: a guest, or anyone
         // without push permission, gets no notification, and a countdown that silently vanishes
         // on reopen reads like a bug. Only the loud parts (beep, vibration, flash) are gated.
@@ -127,7 +124,6 @@ export const useUI = create((set, get) => ({
       }
       if (left <= 3) beep(snd, 660, 0.1)
       if ([10, 5, 3, 2, 1].includes(left)) {
-        announceRestCountdown(useStore.getState().S.voiceCoach, left)
       }
       set({ timer: { ...tm, left } })
     }
@@ -155,7 +151,6 @@ export const useUI = create((set, get) => ({
     if (timerInt) clearInterval(timerInt); timerInt = null
     if (timerTick) document.removeEventListener('visibilitychange', timerTick); timerTick = null
     cancelRestTimerNotification()
-    cancelSpeech()
     set({ timer: null })
   },
 
@@ -216,3 +211,4 @@ export const useUI = create((set, get) => ({
     set({ work: null })
   }
 }))
+

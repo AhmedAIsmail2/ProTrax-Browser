@@ -194,7 +194,7 @@ describe('Workout UI/UX Enhancements', () => {
     expect(container.querySelector('.golden-pr-banner')).toBeNull()
   })
 
-  it('auto-advances focus to the next incomplete set after check-off', async () => {
+  it('scrolls to the next incomplete set without opening the keyboard after check-off', async () => {
     await mount(
       [{ id: '0025', target: { mode: 'reps', weight: 60, reps: 5 }, sets: [{ w: 60, r: 5, done: false }, { w: 60, r: 5, done: false }] }],
       0
@@ -208,9 +208,10 @@ describe('Workout UI/UX Enhancements', () => {
       checkbox.dispatchEvent(new dom.Event('click', { bubbles: true }))
     })
 
-    // Wait for auto-scroll / auto-focus timeout (120ms)
+    // Wait for the auto-scroll timeout; check-off must not focus a numeric field on mobile.
     await new Promise(r => setTimeout(r, 160))
-    expect(focusSpy).toHaveBeenCalled()
+    expect(mocks.scrollCalls.some(({ node }) => node.classList?.contains('setrow'))).toBe(true)
+    expect(focusSpy).not.toHaveBeenCalled()
   })
 
   it('does not re-trigger duplicate PR celebration on subsequent set with same weight/reps', async () => {
@@ -273,7 +274,7 @@ describe('Workout UI/UX Enhancements', () => {
     expect(prBanner.textContent).toContain('15 reps')
   })
 
-  it('auto-scrolls back to incomplete earlier set when a later set is checked first', async () => {
+  it('scrolls back to an incomplete earlier set without opening the keyboard', async () => {
     await mount(
       [{ id: '0025', target: { mode: 'reps', weight: 60, reps: 5 }, sets: [{ w: 60, r: 5, done: false }, { w: 60, r: 5, done: false }] }],
       0
@@ -289,7 +290,8 @@ describe('Workout UI/UX Enhancements', () => {
     })
 
     await new Promise(r => setTimeout(r, 160))
-    expect(focusSpy).toHaveBeenCalled()
+    expect(mocks.scrollCalls.some(({ node }) => node.classList?.contains('setrow'))).toBe(true)
+    expect(focusSpy).not.toHaveBeenCalled()
   })
 
   it('renders attached form check badge on set row and handles set menu attach option', async () => {
@@ -322,3 +324,4 @@ describe('Workout UI/UX Enhancements', () => {
     }
   })
 })
+

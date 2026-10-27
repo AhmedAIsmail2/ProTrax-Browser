@@ -59,7 +59,7 @@ vi.mock('../lib/update.js', () => ({
 vi.mock('./MobileOnboarding.jsx', () => ({ ConnectSheet: () => null }))
 vi.mock('../sheets.jsx', () => ({
   starterPlanSheet: vi.fn(), confirmSheet: (...a) => mocks.confirmSheet(...a), importFromApp: vi.fn(),
-  importFromHevy: vi.fn(), importHubSheet: vi.fn(), equipmentProfileSheet: vi.fn(), menuSheet: vi.fn(),
+  importHubSheet: vi.fn(), equipmentProfileSheet: vi.fn(), menuSheet: vi.fn(),
 }))
 
 globalThis.__APP_VERSION__ ??= 'test'
@@ -85,10 +85,13 @@ afterEach(() => {
 
 // The effect resolves two promises (isAndroid, then checkForUpdate) before the row can render.
 const mount = async () => {
-  await act(async () => { root.render(<Settings />) })
-  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  await act(async () => {
+    root.render(<Settings />)
+    // Let the Android check and the follow-up update request resolve before inspecting the row.
+    await new Promise(resolve => setTimeout(resolve, 0))
+  })
 }
-const updateRow = () => [...host.querySelectorAll('.lrow')].find(r => r.textContent.includes('SmiTriX v9.9.9 available'))
+const updateRow = () => [...host.querySelectorAll('.lrow')].find(r => r.textContent.includes('ProTraX v9.9.9 available'))
 
 describe('Settings — in-app update check', () => {
   it('web build: never asks for releases and shows no update row', async () => {
@@ -132,3 +135,4 @@ describe('Settings — in-app update check', () => {
     expect(updateRow()).toBeUndefined()
   })
 })
+

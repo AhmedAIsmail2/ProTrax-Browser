@@ -22,7 +22,6 @@ import { glyphOf, GLYPH_GROUPS, DEFAULT_GLYPH } from './lib/glyphs.js'
 import BodyMap from './components/BodyMap.jsx'
 import Confetti from './components/Confetti.jsx'
 import MuscleExplorer from './components/MuscleExplorer.jsx'
-import { announceWorkoutComplete } from './lib/voice.js'
 import { exerciseMuscleSnapshot, loadOfWorkouts, MUSCLES, MUSCLE_NAME, normalizeMuscleGroups, hasExplicitMuscleMetadata, musclesOf } from './lib/muscles.js'
 import { parseImport, mergeImport } from './lib/import-csv.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
@@ -30,7 +29,7 @@ import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { exerciseHistory } from './lib/exercise-history.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS, weightIncrement, stepWeight } from './lib/progression.js'
 import { normalizeRepRange } from './lib/rep-range.js'
-import { MOBILE, shareExport } from './lib/mobile.js'
+import { MOBILE, IPHONE_PWA, shareExport, shareWorkoutCard } from './lib/mobile.js'
 import { buildCompletedWorkout } from './lib/finish-workout.js'
 import { isWarmupRow } from './lib/workout-model.js'
 import { nextUnfinishedUnit } from './lib/supersetFlow.js'
@@ -1704,7 +1703,7 @@ function PlanTools({ close }) {
   const exportFile = async () => {
     const bundle = buildPlanBundle(st, user?.name ? t('{0}’s plan', user.name) : '')
     const json = JSON.stringify(bundle, null, 2)
-    const name = 'smitrix-plan-' + todayISO() + '.json'
+    const name = 'protrax-plan-' + todayISO() + '.json'
     if (MOBILE) { try { await shareExport(json, name) } catch (e) { /* dismissed */ } close(); return }
     const blob = new Blob([json], { type: 'application/json' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href)
@@ -1724,7 +1723,7 @@ function PlanTools({ close }) {
     <h3>{t('Share your plan')}</h3>
     <div className="muted small" style={{ marginBottom: 16 }}>{t('Send your routines to a friend, or put your week on paper.')}</div>
     <Button variant="primary" icon="upload" onClick={exportFile} disabled={!hasRoutines}>{t('Export plan file')}</Button>
-    <div className="dim small" style={{ margin: '7px 2px 0', lineHeight: 1.4 }}>{t('A small file a friend imports into their own SmiTriX — routines only, none of your workouts or weigh-ins.')}</div>
+    <div className="dim small" style={{ margin: '7px 2px 0', lineHeight: 1.4 }}>{t('A small file a friend imports into their own ProTraX — routines only, none of your workouts or weigh-ins.')}</div>
     {!MOBILE && <>
       <div style={{ height: 12 }} />
       <Button variant="tinted" icon="download" onClick={() => { close(); printPlan(st, user?.name || '') }} disabled={!hasRoutines}>{t('Print / Save as PDF')}</Button>
@@ -2207,6 +2206,47 @@ function WorkoutComplete({ close }) {
 }
 export const workoutCompleteSheet = () => ui().openSheet(close => <WorkoutComplete close={close} />, { kind: 'center' })
 
+function WorkoutCardShareSheet({ blob, title, text, close }) {
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(blob)
+    setUrl(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [blob])
+  const download = () => {
+    if (!url) return
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `protrax-workout.png`
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+  const share = async () => {
+    if (!navigator.share) { download(); return }
+    setBusy(true)
+    try {
+      const file = new File([blob], 'protrax-workout.png', { type: 'image/png' })
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) { download(); return }
+      await navigator.share({ files: [file], title, text })
+    } catch (error) {
+      if (error?.name !== 'AbortError') download()
+    } finally { setBusy(false) }
+  }
+  return <div style={{ textAlign: 'center' }}>
+    <h3>{t('Share card')}</h3>
+    {url && <img src={url} alt={t('Workout share card')} style={{ display: 'block', width: '100%', maxHeight: '58vh', objectFit: 'contain', borderRadius: 12, margin: '0 auto 14px' }} />}
+    <div className="row" style={{ gap: 8 }}>
+      <Button variant="primary" icon="share" disabled={busy || !url} onClick={share} style={{ flex: 1 }}>{t('Share image')}</Button>
+      <Button icon="download" disabled={!url} onClick={download} style={{ flex: 1 }}>{t('Download image')}</Button>
+    </div>
+    <div style={{ height: 8 }} />
+    <Button variant="ghost" onClick={close}>{t('Close')}</Button>
+  </div>
+}
+
 function FinishSummary({ w, prs, e1prs = [], close }) {
   const st = useStore(s => s.S)
   const hasPRs = Boolean((prs && prs.length > 0) || (e1prs && e1prs.length > 0))
@@ -2246,30 +2286,13 @@ function FinishSummary({ w, prs, e1prs = [], close }) {
         date: fmtDate(w.d, true),
       })
       if (!blob) return
-      const file = new File([blob], `smitrix-workout-${w.d || 'summary'}.png`, { type: 'image/png' })
-      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: 'SmiTriX Workout Summary',
-          text: `Crushed my workout on SmiTriX! ${setsDone(w)} sets, ${fmtVol(w.vol, st.unit)} volume!`,
-        })
-      } else if (typeof navigator !== 'undefined' && navigator.share) {
-        await navigator.share({
-          title: 'SmiTriX Workout Summary',
-          text: `Crushed my workout on SmiTriX! ${setsDone(w)} sets, ${fmtVol(w.vol, st.unit)} volume!`,
-        })
-      } else {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `smitrix-workout-${w.d || 'summary'}.png`
-        a.click()
-        URL.revokeObjectURL(url)
-      }
+      const filename = `protrax-workout-${w.d || 'summary'}.png`
+      const title = 'ProTraX Workout Summary'
+      const shareText = `Crushed my workout on ProTraX! ${setsDone(w)} sets, ${fmtVol(w.vol, st.unit)} volume!`
+      if (MOBILE && !IPHONE_PWA) await shareWorkoutCard(blob, filename, title, shareText)
+      else ui().openSheet(closeSheet => <WorkoutCardShareSheet blob={blob} title={title} text={shareText} close={closeSheet} />)
     } catch (e) {
-      if (e?.name !== 'AbortError') {
-        useUI.getState().toast(t('Share card generated'))
-      }
+      if (e?.name !== 'AbortError') useUI.getState().toast(t('Could not share workout card'))
     }
   }
 
@@ -2346,8 +2369,8 @@ function doFinishWorkout() {
   if (prs.length > 0 || e1prs.length > 0) {
     vibrate([100, 50, 100, 50, 200, 100, 400])
   }
-  announceWorkoutComplete(st.voiceCoach, prs.length + e1prs.length)
   ui().openSheet(close => <FinishSummary w={w} prs={prs} e1prs={e1prs} close={close} />, { kind: 'center', locked: true })
 }
+
 
 
