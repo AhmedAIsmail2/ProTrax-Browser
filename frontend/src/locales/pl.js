@@ -251,6 +251,7 @@ export default {
   'Less time': 'Mniej',
   'More time': 'Więcej',
   'No data yet': 'Brak danych',
+  'Routines': 'Plany treningowe',
   'Your weekly routine': 'Twój plan tygodnia',
   'Week schedule': 'Harmonogram tygodnia',
   'No routines yet.': 'Brak planów.',

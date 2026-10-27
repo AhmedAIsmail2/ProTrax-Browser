@@ -251,6 +251,7 @@ export default {
   'Less time': 'Az',
   'More time': 'Çok',
   'No data yet': 'Henüz veri yok',
+  'Routines': 'Rutinler',
   'Your weekly routine': 'Haftalık rutinin',
   'Week schedule': 'Hafta programı',
   'No routines yet.': 'Henüz rutin yok.',

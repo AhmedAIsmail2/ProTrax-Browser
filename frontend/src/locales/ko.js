@@ -251,6 +251,7 @@ export default {
   'Less time': '적음',
   'More time': '많음',
   'No data yet': '데이터 없음',
+  'Routines': '루틴',
   'Your weekly routine': '주간 루틴',
   'Week schedule': '주간 일정',
   'No routines yet.': '아직 루틴이 없어요.',

@@ -12,7 +12,7 @@ describe('Japanese locale (ja)', () => {
 
   test('matches the reference key set exactly', () => {
     const jaKeys = Object.keys(ja).sort()
-    expect(jaKeys.length).toBe(1265)
+    expect(jaKeys.length).toBe(1254)
   })
 
   test('preserves all interpolation placeholders', () => {

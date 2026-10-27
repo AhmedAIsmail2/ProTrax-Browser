@@ -251,6 +251,7 @@ export default {
   'Less time': 'Меньше',
   'More time': 'Больше',
   'No data yet': 'Данных пока нет',
+  'Routines': 'Планы тренировок',
   'Your weekly routine': 'Твой недельный план',
   'Week schedule': 'Расписание недели',
   'No routines yet.': 'Программ пока нет.',

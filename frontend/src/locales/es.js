@@ -251,6 +251,7 @@ export default {
   'Less time': 'Menos',
   'More time': 'Más',
   'No data yet': 'Aún sin datos',
+  'Routines': 'Rutinas',
   'Your weekly routine': 'Tu rutina semanal',
   'Week schedule': 'Horario semanal',
   'No routines yet.': 'Aún no hay rutinas.',

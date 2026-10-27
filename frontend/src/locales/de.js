@@ -261,6 +261,7 @@ export default {
   'More time': 'Mehr',
   'No data yet': 'Noch keine Daten',
   // --- plan view ---
+  'Routines': 'Routinen',
   'Your weekly routine': 'Deine Wochenroutine',
   'Week schedule': 'Wochenplan',
   'No routines yet.': 'Noch keine Routinen.',

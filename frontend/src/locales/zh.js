@@ -251,6 +251,7 @@ export default {
   'Less time': '少',
   'More time': '多',
   'No data yet': '暂无数据',
+  'Routines': '训练计划',
   'Your weekly routine': '你的每周安排',
   'Week schedule': '每周日程',
   'No routines yet.': '还没有训练日。',
