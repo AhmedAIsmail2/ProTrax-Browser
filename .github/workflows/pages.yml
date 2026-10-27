@@ -1,4 +1,4 @@
-# Publishes the iPhone local-first app at the root of this GitHub Pages site.
+# Publishes the local-first iPhone app at /demo; the root page redirects there.
 name: Deploy website to GitHub Pages
 
 on:
@@ -42,13 +42,19 @@ jobs:
           VITE_IMG_BASE: ${{ env.DATASET }}/images/
           VITE_GIF_BASE: ${{ env.DATASET }}/videos/
 
+      - name: Stage the site with its /demo app
+        run: |
+          rm -rf website/demo
+          mkdir -p website/demo
+          cp -R frontend/dist-iphone/. website/demo/
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: frontend/dist-iphone
+          path: website
 
   deploy:
     needs: build
@@ -59,3 +65,4 @@ jobs:
     steps:
       - id: deploy
         uses: actions/deploy-pages@v4
+
