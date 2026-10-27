@@ -91,7 +91,7 @@
   <text x="445" y="336" font-family="system-ui, sans-serif" font-size="10" fill="#334155" text-anchor="middle">• WebAuthn FIDO2 Biometric Engine</text>
   <text x="445" y="352" font-family="system-ui, sans-serif" font-size="10" fill="#334155" text-anchor="middle">• HMAC-SHA256 Signed Session Cookies</text>
   <text x="445" y="368" font-family="system-ui, sans-serif" font-size="10" fill="#334155" text-anchor="middle">• Web Push Dispatch (VAPID Keys)</text>
-  <text x="445" y="384" font-family="system-ui, sans-serif" font-size="10" fill="#334155" text-anchor="middle">• AI Coach Allowlist Execution Gateway</text>
+  <text x="445" y="384" font-family="system-ui, sans-serif" font-size="10" fill="#334155" text-anchor="middle">• Per-user State &amp; Secret Storage</text>
   <text x="445" y="400" font-family="system-ui, sans-serif" font-size="10" fill="#334155" text-anchor="middle">• Atomic File Writes (`atomicWrite`)</text>
   <rect x="335" y="415" width="220" height="40" rx="5" fill="#dcfce7" stroke="#86efac"/>
   <text x="445" y="432" font-family="system-ui, sans-serif" font-size="9.5" font-weight="bold" fill="#14532d" text-anchor="middle">Strict Privilege Isolation &amp; Security</text>
@@ -131,3 +131,4 @@
   <line x1="565" y1="365" x2="625" y2="205" stroke="#d97706" stroke-width="2" marker-end="url(#arrow)"/>
   <line x1="565" y1="185" x2="625" y2="340" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow)"/>
 </svg>
+

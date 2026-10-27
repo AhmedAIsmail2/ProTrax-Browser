@@ -194,7 +194,7 @@ export async function sendTestNotification() {
     await LocalNotifications.schedule({
       notifications: [{
         id: 8888,
-        title: 'SmiTriX Active 🏋️',
+        title: 'ProTraX Active 🏋️',
         body: 'Notifications are working! You will see rest timers and workout reminders here.',
         channelId: 'workout-reminders',
         schedule: { at: new Date(Date.now() + 500), allowWhileIdle: true },
@@ -326,6 +326,22 @@ export async function shareExport(json, filename) {
   await Share.share({ title: filename, url: w.uri })
 }
 
+// Share a generated workout image through Android's native share sheet.
+export async function shareWorkoutCard(blob, filename, title, text) {
+  if (!MOBILE || IPHONE_PWA) return false
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error || new Error('Could not read share image'))
+    reader.onload = () => resolve(String(reader.result).split(',')[1])
+    reader.readAsDataURL(blob)
+  })
+  const { Filesystem, Directory } = await import('@capacitor/filesystem')
+  const { Share } = await import('@capacitor/share')
+  const file = await Filesystem.writeFile({ path: filename, directory: Directory.Cache, data: base64 })
+  await Share.share({ title, text, url: file.uri, dialogTitle: title })
+  return true
+}
+
 // "Auto-backup on changes" (Settings): a dated snapshot dropped into the Documents folder —
 // visible in Files (iOS) / a file manager (Android), unlike the private mirror nativeSave keeps
 // — so whatever the user points at that folder (a sync app, a manual copy) always has something
@@ -343,3 +359,4 @@ export async function writeAutoBackup(state) {
     })
   } catch (e) { /* best effort — the private mirror in Directory.Data still has the data */ }
 }
+

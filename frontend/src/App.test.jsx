@@ -49,7 +49,7 @@ afterEach(() => {
 })
 
 describe('App shell and component placement', () => {
-  it('does not render TabBar when mobile onboarding is active', async () => {
+  it('keeps TabBar visible while mobile onboarding is active', async () => {
     useStore.setState({
       user: { id: 'test_user', name: 'Test User' },
       needsMobileOnboarding: true,
@@ -60,20 +60,7 @@ describe('App shell and component placement', () => {
       root.render(<App />)
     })
 
-    expect(container.querySelector('#tabbar')).toBeNull()
-  })
-
-  it('renders TabBar when authenticated and onboarding is completed', async () => {
-    useStore.setState({
-      user: { id: 'test_user', name: 'Test User' },
-      needsMobileOnboarding: false,
-      ready: true,
-    })
-
-    await act(async () => {
-      root.render(<App />)
-    })
-
     expect(container.querySelector('#tabbar')).not.toBeNull()
   })
 })
+

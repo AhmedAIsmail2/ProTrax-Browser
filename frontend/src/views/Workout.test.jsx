@@ -1151,7 +1151,7 @@ describe('workout controls: the more menu and the set menu', () => {
 })
 
 describe('auto-advance set focus', () => {
-  it('focuses the input of the next undone set after checking a set', async () => {
+  it('scrolls to the next undone set without opening the keyboard after check-off', async () => {
     await mount([exercise('plain-bench', [false, false, false])])
     const focusSpy = vi.fn()
     dom.HTMLElement.prototype.focus = focusSpy
@@ -1159,7 +1159,8 @@ describe('auto-advance set focus', () => {
     await toggleSet(0)
     await new Promise(r => setTimeout(r, 150))
 
-    expect(focusSpy).toHaveBeenCalled()
+    expect(mocks.scrollCalls.some(({ node }) => node.classList?.contains('setrow'))).toBe(true)
+    expect(focusSpy).not.toHaveBeenCalled()
   })
 
   it('does not focus when the completed set is the last undone set in the exercise', async () => {
@@ -1173,4 +1174,5 @@ describe('auto-advance set focus', () => {
     expect(focusSpy).not.toHaveBeenCalled()
   })
 })
+
 

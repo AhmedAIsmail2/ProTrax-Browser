@@ -11,11 +11,6 @@ import {
   generateAuthenticationOptions, verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
-import * as coachConfig from './coach/config.js';
-import * as coachJobs from './coach/jobs.js';
-import { coachRoutes } from './coach/routes.js';
-import { startCadence } from './coach/cadence.js';
-import { startWarmup } from './coach/warmup.js';
 import { dayReminderPush, restTimerPush, testPush } from './push-messages.js';
 import { verifyError } from './verify-error.js';
 
@@ -43,19 +38,10 @@ const MAX_BODY = 5 * 1024 * 1024;
 const SECURE = /^https:/i.test(ORIGIN) ? ' Secure;' : '';
 
 fs.mkdirSync(DATA, { recursive: true });
-/* The secrets are locked down file by file rather than by sealing the whole directory.
- *
- * A blanket `chmod 0700` on DATA looks stronger and is worse: ./data is a host bind mount and
- * this container runs as root, so it lands on the host as root-owned 0700 and anything else
- * the owner runs against their own data directory — a backup script, the MCP server in #19,
- * their own `jq` — gets EACCES on files that are theirs. Locking the four files that actually
- * hold secrets keeps the Coach runtime out of them without taking the directory hostage.
- *
- * Best-effort throughout: a bind-mounted host filesystem may refuse chmod, and that is not a
- * reason to refuse to boot. The privilege drop in adapters/spawn.js is the control that does
- * fail closed. */
+/* Keep the files containing account secrets private without restricting access to the whole
+ * bind-mounted data directory. Best-effort because a host filesystem may refuse chmod. */
 const lock = f => { try { fs.chmodSync(path.join(DATA, f), 0o600); } catch { /* not present yet, or host says no */ } };
-['secret', 'db.json', 'coach.json'].forEach(lock);
+['secret', 'db.json'].forEach(lock);
 
 /* ---------- secret + db ---------- */
 const secretFile = path.join(DATA, 'secret');
@@ -566,13 +552,9 @@ if (AUDIT_ON) {
 const routes = {
   'GET /api/health': async (req, res) => json(res, 200, { ok: true, users: db.users.length }),
 
-  // Public config the login screen needs before anyone is signed in. `coach` is absent unless
-  // the instance has both switched the Coach on and successfully connected a provider — the
-  // single flag every piece of Coach UI hangs off, so an unconfigured instance is byte-for-byte
-  // the app it was before the feature existed.
+  // Public config the login screen needs before anyone is signed in.
   'GET /api/config': async (req, res) => {
-    const coach = coachConfig.publicConfig();
-    json(res, 200, { invite_only: INVITE_ONLY, allow_guest: ALLOW_GUEST, ...(coach ? { coach } : {}) });
+    json(res, 200, { invite_only: INVITE_ONLY, allow_guest: ALLOW_GUEST });
   },
 
   'GET /api/me': async (req, res) => {
@@ -987,32 +969,8 @@ const routes = {
     auditCount = 0;
     audit(req, 'admin.audit.clear', { user: admin });
     json(res, 200, { ok: true });
-  },
-
-  /* ---------- AI Coach ---------- */
-  // Routes live in coach/routes.js and are handed the helpers above rather than importing
-  // them: they are closures over db and SECRET, and passing them in keeps that module free of
-  // a cycle. Every one of them is inert while the feature is unconfigured.
-  ...coachRoutes({ json, readBody, readSession, requireAdmin })
+  }
 };
-
-/* ---------- Coach: boot recovery, notifications, scheduled reviews ---------- */
-// A job that was running when the process died is not coming back; say so rather than leaving
-// a spinner that never resolves.
-coachJobs.recoverOnBoot();
-// A ready proposal is the one Coach event worth a notification. Failures and "nothing to
-// change" stay silent on purpose (FR-38/E4).
-coachJobs.setProposalHook((uid, pending) => {
-  const n = (pending?.changes || []).length;
-  if (!n) return;
-  sendPush(uid, {
-    title: 'Your Coach has been reading',
-    body: n === 1 ? '1 suggestion after this week' : `${n} suggestions after this week`,
-    tag: 'coach-proposal', url: '#/coach'
-  });
-});
-startCadence({ users: () => db.users, userNow });
-startWarmup();
 
 http.createServer(async (req, res) => {
   // Same-origin (the deployed nginx-proxied web app) never triggers CORS, so this only matters
@@ -1046,3 +1004,4 @@ http.createServer(async (req, res) => {
     if (!res.headersSent) json(res, 500, { error: 'server error' });
   }
 }).listen(PORT, () => console.log(`gym-api on :${PORT} (rpID=${RP_ID}, origin=${ORIGIN})`));
+

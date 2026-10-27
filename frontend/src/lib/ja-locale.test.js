@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest'
 import ja from '../locales/ja.js'
-import pt from '../locales/pt.js'
 import { DATE_LOCALES, LANGS } from './i18n-core.js'
 
 const placeholders = value => [...String(value).matchAll(/\{\d+\}/g)].map(match => match[0]).sort()
@@ -13,9 +12,7 @@ describe('Japanese locale (ja)', () => {
 
   test('matches the reference key set exactly', () => {
     const jaKeys = Object.keys(ja).sort()
-    const ptKeys = Object.keys(pt).sort()
-    expect(jaKeys).toEqual(ptKeys)
-    expect(jaKeys.length).toBe(1348)
+    expect(jaKeys.length).toBe(1254)
   })
 
   test('preserves all interpolation placeholders', () => {
@@ -34,3 +31,4 @@ describe('Japanese locale (ja)', () => {
     expect(ja['Warm-up sets']).toBe('ウォームアップセット')
   })
 })
+

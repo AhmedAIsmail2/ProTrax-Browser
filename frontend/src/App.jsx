@@ -7,6 +7,7 @@ import { ACCENTS } from './lib/format.js'
 import { setLang, useLang } from './lib/i18n.js'
 import { setNav } from './lib/nav.js'
 import { initBackButton } from './lib/back.js'
+import { dismissKeyboardOnEnter } from './lib/input-keyboard.js'
 import { useWakeLock } from './lib/wakelock.js'
 import { startFlow } from './sheets.jsx'
 import Icon from './components/Icon.jsx'
@@ -142,6 +143,12 @@ function Shell() {
 export default function App() {
   const boot = useStore(s => s.boot)
   useEffect(() => { boot() }, [boot])
+  // Treat Enter as Done for every one-line input across routes and sheets. The
+  // shared capture point also covers standalone inputs that don't use TextField.
+  useEffect(() => {
+    document.addEventListener('keydown', dismissKeyboardOnEnter)
+    return () => document.removeEventListener('keydown', dismissKeyboardOnEnter)
+  }, [])
   // Android system back — sheet, then page, then press-again-to-exit (see lib/back.js)
   useEffect(() => {
     let stop = null, gone = false
@@ -150,3 +157,4 @@ export default function App() {
   }, [])
   return <HashRouter><Shell /></HashRouter>
 }
+

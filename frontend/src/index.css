@@ -42,9 +42,9 @@
   --purple:#bf5af2; --mint:#63e6e2; --brown:#ac8e68; --grey:#8e8e93;
 
   /* accent (per-account, synced) */
-  --acc:  var(--green);
-  --acc-2:#248a3d;
-  --on-acc:#000000;
+  --acc:  var(--blue);
+  --acc-2:#0060df;
+  --on-acc:#ffffff;
   --acc-soft: color-mix(in srgb, var(--acc) 16%, transparent);
   --acc-line: color-mix(in srgb, var(--acc) 38%, transparent);
 
@@ -109,6 +109,26 @@
 :root[data-accent="red"]   { --acc:var(--red);    --acc-2:#d70015; --on-acc:#fff }
 :root[data-accent="teal"]  { --acc:var(--teal);   --acc-2:#0071a4; --on-acc:#000 }
 :root[data-accent="gold"]  { --acc:var(--yellow); --acc-2:#b25000; --on-acc:#000 }
+
+.brand-name { display: inline-flex; align-items: center; gap: 0; white-space: nowrap }
+.brand-name-word {
+  font-family: "Arial Black", Arial, sans-serif;
+  font-size: .94em;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -.065em;
+}
+.brand-name-x {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1.5em;
+  height: 1.47em;
+  margin-left: -.24em;
+  background: var(--acc);
+  transform: translateY(-.10em);
+  -webkit-mask: var(--brand-x-mask) center / contain no-repeat;
+  mask: var(--brand-x-mask) center / contain no-repeat;
+}
 /* Label colour on a filled accent button is picked per accent by measured contrast,
    not by taste. Button text is 17px/600, so the AA bar is 3:1 (large text). White on
    the light-theme green is 2.22:1 and on teal 2.57:1 — both fail, and green is the
@@ -816,6 +836,20 @@ h4.sec{
 .setrow .stp.r{flex:1.1;min-width:0}
 .setrow .stp button{width:28px;height:38px;transition:transform .12s cubic-bezier(.2,.8,.2,1),background var(--fast)}
 .setrow .stp button:active{transform:scale(.86)}
+/* Keep multi-digit values readable on narrow phones, where the set number, previous value,
+   two steppers and completion control all share one row. */
+@media(max-width:430px){
+  .setrow{gap:4px;padding-left:2px;padding-right:2px}
+  .setrow .n{width:26px;height:26px}
+  .setrow .prev-col{flex:.5}
+  .sethead .prev-sp{flex:.5}
+  .setrow .stp.w,.sethead .w-sp{flex:1.35}
+  .setrow .stp.r,.sethead .r-sp{flex:1.05}
+  .setrow .stp button{width:22px}
+  .setrow .stp .num{font-size:15px;letter-spacing:-.035em}
+  .setrow .chk{width:30px;height:30px}
+  .setrow.eff3 .stp.w button,.setrow.eff3 .stp.r button{width:22px}
+}
 /* The effort column is a single tap-to-pick button, not a stepper. It is a direct flex child
    of the row (like the .stp cells), carrying its own column width via flex. `align-self` and
    a fixed height stop the row from stretching it taller than the weight/reps cells; it is NOT
@@ -2200,23 +2234,4 @@ body.resting #toast{bottom:calc(200px + var(--sab))}
 .tp-empty { margin-top: 12px; }
 @keyframes tp-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .training-progress, .tp-session { animation: none; } }
-/* ProTraX wordmark: the X uses the active theme accent. */
-.brand-name { display: inline-flex; align-items: center; gap: 0; white-space: nowrap }
-.brand-name-word {
-  font-family: "Arial Black", Arial, sans-serif;
-  font-size: .94em;
-  font-weight: 900;
-  font-style: italic;
-  letter-spacing: -.065em;
-}
-.brand-name-x {
-  display: inline-block;
-  flex: 0 0 auto;
-  width: 1.5em;
-  height: 1.47em;
-  margin-left: -.24em;
-  background: var(--acc);
-  transform: translateY(-.10em);
-  -webkit-mask: var(--brand-x-mask) center / contain no-repeat;
-  mask: var(--brand-x-mask) center / contain no-repeat;
-}
+

@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.4 — 2026-10-27
+
+- Removed the unused AI Coach and Voice Coach integrations, direct Hevy API import, and Portuguese localization, including their source files, tests, translations, and setup documentation.
+- Kept Hevy CSV import and improved weight/repetition number visibility on narrow workout screens.
+- Enter/Done now closes the keyboard across one-line fields without moving focus; fixed sharing the workout summary card.
+- Updated GitHub Pages to publish the local-first app at `/demo/` and redirect the site root to it.
+
 ## v1.5.0 — 2026-10-18
 
 Wearable BLE heart rate sensors, Compound Lift Form Check Video Vault, offline PWA Background Sync, 30-Day Muscle Recovery Readiness Index, Olympic plate badges, and full Japanese localization.
@@ -326,7 +333,7 @@ what you actually log — off by default, switched on by the admin, consented to
 and driven by whatever AI you bring: an Anthropic, OpenAI or Gemini API key, any
 OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, OpenRouter), or a Claude Code / Codex
 runtime inside the container. Nothing it proposes is applied on its own; every change carries
-its reason and can be undone. Details in [docs/AI_COACH.md](docs/AI_COACH.md). Also in this
+its reason and can be undone. Details were documented in the AI Coach guide for that release. Also in this
 release: per-exercise bar weight, a rest-day line on the home screen, and the admin dashboard
 rewritten in plain language — those three shipped to main earlier and are here for everyone.
 
@@ -1566,3 +1573,4 @@ First public release. A complete, self-hostable gym & body-weight tracker.
 **Notes**
 - Exercise media (~140 MB) is fetched from [hasaneyldrm/exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset) on first run.
 - Licensed under GNU AGPL v3.0.
+

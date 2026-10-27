@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { canMoveActiveWorkoutUnit, moveActiveWorkoutUnit } from './active-workout-order.js'
 import { LANGS } from './i18n-core.js'
-import { PT_BR_OVERRIDES } from '../locales/pt-BR.js'
 
 const entry = (id, extra = {}) => ({
   id,
@@ -81,7 +80,6 @@ describe('active workout move locale coverage', () => {
         expect(pack[key].trim(), `${code} has a blank ${key}`).not.toBe('')
       }
     }
-    expect(Object.hasOwn(PT_BR_OVERRIDES, 'Move up')).toBe(true)
-    expect(Object.hasOwn(PT_BR_OVERRIDES, 'Move down')).toBe(true)
   })
 })
+
