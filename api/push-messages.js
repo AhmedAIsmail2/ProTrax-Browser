@@ -7,14 +7,6 @@ const COPY = {
     dayRoutineSuffix: 'today',
     dayBody: "It's on your plan — let's go 💪",
   },
-  'pt-BR': {
-    restTitle: 'Descanso terminado 💪',
-    restBody: 'Hora da próxima série.',
-    testBody: 'Notificação de teste ✅ — é assim que os alertas aparecem.',
-    dayFallbackTitle: 'Treino planejado para hoje',
-    dayRoutineSuffix: 'hoje',
-    dayBody: 'Está no seu plano — vamos treinar 💪',
-  },
 };
 
 const copyFor = lang => COPY[lang] || COPY.en;
@@ -38,3 +30,4 @@ export function dayReminderPush(lang, routine) {
     tag: 'day-reminder',
   };
 }
+
