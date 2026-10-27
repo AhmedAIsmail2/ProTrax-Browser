@@ -14,6 +14,7 @@ protrax-backup-*.json
 # Build output / deps
 frontend/dist/
 frontend/dist-iphone/
+website/demo/
 node_modules/
 *.log
 .DS_Store
@@ -41,3 +42,5 @@ junit.xml
 coverage/
 frontend/bundle-size.json
 brag-output/
+
+
