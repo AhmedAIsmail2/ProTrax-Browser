@@ -5,13 +5,13 @@
 # gitea.com ones (.gitea/, kept only so the mirror stays buildable).
 #
 # What it does, in order:
-#   test        — frontend, MCP and api (Coach) suites on every branch, MR and tag, each with a
+#   test        — frontend, MCP and account API suites on every branch, MR and tag, each with a
 #                 JUnit report (failures show up in the MR widget) and coverage; the frontend
 #                 job also measures the bundle and compares it with main's.
 #                 On a v* tag: release:preflight checks tag, package versions and CHANGELOG
 #                 before anything expensive starts.
 #   build       — the two container images → registry.gitlab.com/jogdandasmit/smitrix/{api,web},
-#                 and a run of both api targets that proves what each one does and does not carry
+#                 and smoke checks that they build and serve
 #   package     — the signed Android APK → job artifact + generic package registry
 #   verify      — the images that were just pushed, started together through docker-compose.yml
 #                 and asked to serve; plus a Trivy scan and an SBOM per image
@@ -242,21 +242,12 @@ test:api:
   script:
     - cd api
     - npm ci --cache .npm --prefer-offline --omit=optional
-    # The Coach tests run on node:test and drive the in-repo fixture provider plus a local mock
-    # of the Chat Completions shape, so the whole job works without an AI account or the network.
-    # Same suite `npm test` runs, plus the JUnit file and node's own coverage table.
     - node --experimental-test-coverage --test
         --test-reporter=spec --test-reporter-destination=stdout
         --test-reporter=junit --test-reporter-destination=junit.xml
-        test/*.test.js
+        push-messages.test.js
     - cd ..
-    # The api's copy of the exercise catalogue and the prompt module are generated and committed.
-    # A dataset or prompt change that forgets to regenerate them would otherwise only surface as
-    # "the Coach can't find that exercise" — or a prompt edit that never reached the model.
-    - node scripts/build-coach-assets.mjs --check
-    # api/coach/core is imported by the server under bare node AND by the phone under Vite.
-    # vitest forgives what node does not (?raw, import.meta.glob); this runs outside vitest.
-    - node api/scripts/check-core-loadable.mjs
+    - node --check api/server.js
   coverage: '/all files\s*\|\s*(\d+\.?\d*)/'
   artifacts:
     when: always
@@ -375,79 +366,24 @@ build:images:
       when: manual
       allow_failure: true
 
-# Builds *and runs* both api targets. Building alone would not have caught the api image
-# shipping without coach/ — that image built perfectly and exited on boot. So each target has to
-# answer for itself: the untargeted build (which is what build:images publishes, since it names
-# no --target) boots, serves, carries no AI runtime and still constructs the HTTPS providers;
-# the coach one additionally resolves the Agent SDK's per-platform runtime (musl on this base),
-# which is the one thing that cannot be checked from the source tree. amd64 only, never pushed.
+# Build and start the account API image, then verify its configuration endpoint.
 build:api-check:
   extends: .docker
   stage: build
   needs: ["test:api"]
   script:
-    - docker build --target default -t smitrix-api:default ./api
-    - docker build --target coach   -t smitrix-api:coach   ./api
-    # No --target, exactly like build:images. What it ships is whatever Dockerfile stage happens
-    # to be last, and that untargeted artifact is the image every self-hoster pulls as :latest.
     - docker build -t smitrix-api:published ./api
-    # --- the published image has no AI runtime, and does not need one for the HTTPS providers
-    - |
-      set -eu
-      docker run --rm smitrix-api:published node -e \
-        'import("@anthropic-ai/claude-agent-sdk").then(()=>{console.error("AI runtime present in the published image -- the last Dockerfile stage is no longer the runtime-free one");process.exit(1)},()=>process.exit(0))'
-      ! docker run --rm smitrix-api:published codex --version 2>/dev/null
-      ! docker run --rm smitrix-api:published bwrap --version 2>/dev/null
-      # npm is stripped from the published image (see api/Dockerfile) — its bundled tree was
-      # the only source of scanner findings, and nothing at runtime needs it.
-      ! docker run --rm smitrix-api:published npm --version 2>/dev/null
-      ! docker run --rm smitrix-api:published test -d /usr/local/lib/node_modules/npm
-      docker run --rm smitrix-api:published node --input-type=module -e '
-        const { adapterFor } = await import("./coach/adapters/index.js");
-        for (const id of ["anthropic", "openai", "gemini", "compatible"]) {
-          const a = adapterFor(id);
-          if (!a || a.spawns !== false || typeof a.invoke !== "function") { console.error(id + " is not a usable HTTPS adapter in the published image"); process.exit(1); }
-        }
-        const r = await adapterFor("anthropic").check({}, {});
-        if (!r.ok || !r.needsKey) { console.error("anthropic.check() without a key should report a ready runtime that needs a key: " + JSON.stringify(r)); process.exit(1); }
-        console.log("HTTPS providers constructible on the published image");
-      '
-    # --- the default image boots and serves
     - |
       set -eu
       docker network create api-net
-      docker run -d --name api-default --network api-net -e DATA_DIR=/data smitrix-api:default
+      docker run -d --name api-check --network api-net -e DATA_DIR=/data smitrix-api:published
       for i in $(seq 1 30); do
-        docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-default:3000/api/config >/dev/null 2>&1 && break
+        docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-check:3000/api/config >/dev/null 2>&1 && break
         sleep 1
       done
-      docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-default:3000/api/config | tee /dev/stderr | grep -q '"invite_only"'
-      docker run --rm smitrix-api:default node -e \
-        'import("@anthropic-ai/claude-agent-sdk").then(()=>{console.error("AI runtime present in the default image");process.exit(1)},()=>process.exit(0))'
-      docker rm -f api-default
+      docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-check:3000/api/config | tee /dev/stderr | grep -q '"invite_only"'
+      docker rm -f api-check
       docker network rm api-net
-    # --- the coach image carries a runnable Agent SDK, Codex and its sandbox
-    - |
-      set -eu
-      docker run --rm smitrix-api:coach node --input-type=module -e '
-        const { adapterFor } = await import("./coach/adapters/index.js");
-        const r = await adapterFor("claude").check();
-        if (!r.ok) { console.error(r.error); process.exit(1); }
-        console.log(r.version);
-      '
-      docker run --rm smitrix-api:coach codex --version
-      docker run --rm smitrix-api:coach bwrap --version
-      # Owned by the user jobs drop to, and 0700 — a credential cache readable by anything else
-      # in the container would undo the point of dropping privileges at all.
-      test "$(docker run --rm smitrix-api:coach stat -c '%U %a' /coach-auth)" = "coach 700"
-    # --- neither Codex nor its sandbox is in the default image; the privilege drop can be performed
-    - |
-      set -eu
-      ! docker run --rm smitrix-api:default codex --version 2>/dev/null
-      ! docker run --rm smitrix-api:default bwrap --version 2>/dev/null
-      # canDropPrivileges() fails closed for the runtime-backed providers, so a missing `coach`
-      # user disables every one of their jobs — including the fixture. Cheaper to assert here.
-      docker run --rm smitrix-api:default id coach
   rules:
     - !reference [.rules, not_on_schedule]
     - *release_tag
@@ -461,23 +397,21 @@ build:api-check:
       when: manual
       allow_failure: true
 
-# The web image is built from the repository root, and the frontend imports the Coach core from
-# api/coach/core — a path the Dockerfile has to copy by hand. Nothing in test:frontend or the
-# Pages build goes through that Dockerfile, so an MR could pass everything and still ship an
-# image that does not build (v1.2.15 did). Built here, never pushed.
+# The web image is built from the repository root. Build and verify its app shell here without
+# relying only on the static Pages artifact. Built here, never pushed.
 build:web-check:
   extends: .docker
   stage: build
   needs: ["test:frontend"]
   script:
     - docker build -f web/Dockerfile -t smitrix-web:check .
-    # It serves the app shell, and the shell is this build (the Coach setup is in the bundle).
+    # It serves the app shell.
     - |
       set -eu
       docker run -d --name web-check -e BACKEND=127.0.0.1 -e PORT=3000 smitrix-web:check
       sleep 2
       docker exec web-check wget -qO- http://127.0.0.1/ | grep -q '<div id="root">'
-      docker exec web-check sh -c 'grep -l "coach" /usr/share/nginx/html/assets/index-*.js >/dev/null'
+      docker exec web-check sh -c 'grep -l "ProTraX" /usr/share/nginx/html/assets/index-*.js >/dev/null'
       docker rm -f web-check
   rules:
     - !reference [.rules, not_on_schedule]
@@ -488,7 +422,6 @@ build:web-check:
         paths:
           - "frontend/**/*"
           - "web/**/*"
-          - "api/coach/core/**/*"
           - ".gitlab-ci.yml"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
@@ -742,7 +675,6 @@ pages:
       changes:
         paths:
           - "frontend/**/*"
-          - "api/coach/core/**/*"
           - ".gitlab-ci.yml"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
@@ -880,3 +812,4 @@ mr:fork-pipelines:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
+
