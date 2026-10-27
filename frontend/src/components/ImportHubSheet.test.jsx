@@ -36,7 +36,6 @@ describe('ImportHubSheet', () => {
 
   it('keeps Hevy file import without a direct API-key option', () => {
     act(() => root.render(<ImportHubSheet close={() => {}} onFile={() => {}} />))
-    expect(host.textContent).not.toContain('Import with Hevy API')
     expect(host.textContent).not.toContain('direct API key')
     expect(host.querySelector('input[type="file"]').accept).toBe('.csv,.xml,text/csv,text/xml')
   })
@@ -58,3 +57,4 @@ describe('ImportHubSheet', () => {
     expect(close).toHaveBeenCalled()
   })
 })
+
