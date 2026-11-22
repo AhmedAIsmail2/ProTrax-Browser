@@ -474,28 +474,28 @@ document.querySelectorAll('[data-xall]').forEach(b => b.addEventListener('click'
 
 const html = `<!DOCTYPE html>
 <!-- GENERATED FILE - do not edit by hand.
-     Built by scripts/build-api-docs.mjs from api/openapi.yaml (openGym API v${spec.info.version}).
+     Built by scripts/build-api-docs.mjs from api/openapi.yaml (ProTraX API v${spec.info.version}).
      Regenerate with: node scripts/build-api-docs.mjs -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>openGym: API</title>
-<meta name="description" content="The complete openGym HTTP API, documented as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
+<title>ProTraX: API</title>
+<meta name="description" content="The complete ProTraX HTTP API, documented as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
 <meta name="theme-color" content="#000000">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <link rel="preconnect" href="https://stats.duarte-santos.ch">
-<meta property="og:title" content="openGym API reference">
-<meta property="og:description" content="The complete openGym HTTP API as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
+<meta property="og:title" content="ProTraX API reference">
+<meta property="og:description" content="The complete ProTraX HTTP API as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
 <meta property="og:image" content="https://opengym.ch/img/social.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="openGym: your training, your data, your server. Two phones showing the home and workout screens.">
+<meta property="og:image:alt" content="ProTraX: your training, your data, your server. Two phones showing the home and workout screens.">
 <meta property="og:url" content="https://opengym.ch/api.html">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="openGym">
+<meta property="og:site_name" content="ProTraX">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="openGym API reference">
+<meta name="twitter:title" content="ProTraX API reference">
 <meta name="twitter:image" content="https://opengym.ch/img/social.jpg">
 <link rel="canonical" href="https://opengym.ch/api.html">
 <link rel="icon" href="/favicon.ico" sizes="48x48">
@@ -515,7 +515,7 @@ const html = `<!DOCTYPE html>
 <nav><div class="wrap nav-in">
   <a class="brand" href="/">
     <img src="icon-180.png" alt="" width="24" height="24">
-    openGym
+    ProTraX
   </a>
   <div class="nav-quick">
     <a class="ql site" href="/#features">Features</a>
@@ -577,7 +577,7 @@ ${railTags}
 
 <main id="main" class="api-main">
   <h1>API</h1>
-  <p class="lead">Every route the openGym backend serves (passkey auth, state sync,
+  <p class="lead">Every route the ProTraX backend serves (passkey auth, state sync,
      push, pairing, admin) as one hand-written
      OpenAPI&nbsp;spec. The same file lives
      <a href="https://github.com/DuarteSantos8/openGym/blob/main/api/openapi.yaml" rel="noopener">in the repository</a>
@@ -589,7 +589,7 @@ ${railTags}
   </div>
   <p class="api-facts">
     <span>OpenAPI ${esc(spec.openapi)}</span>
-    <span>openGym v${esc(spec.info.version)}</span>
+    <span>ProTraX v${esc(spec.info.version)}</span>
     <span>${ops.length} endpoints</span>
     <span>${esc(spec.info.license.name)}</span>
   </p>
@@ -622,7 +622,7 @@ ${schemaCards}
 </main>
 
 <footer><div class="wrap foot">
-  <span class="c">openGym · AGPL-3.0 · © 2026 <a href="https://duarte-santos.ch" rel="noopener">Duarte Santos</a></span>
+  <span class="c">ProTraX · AGPL-3.0 · © 2026 <a href="https://duarte-santos.ch" rel="noopener">Duarte Santos</a></span>
   <div class="links">
     <a href="docs.html">Docs</a>
     <a href="about.html">About</a>
@@ -658,3 +658,4 @@ if (check) {
   fs.writeFileSync(outPath, html)
   console.log(`wrote ${rel}: ${summary}`)
 }
+

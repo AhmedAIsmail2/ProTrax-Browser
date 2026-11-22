@@ -30,7 +30,7 @@ public class WidgetContentTest {
         assertEquals("Best: 9", c.caption);
         assertEquals(1, c.freezes);
         assertEquals("Wochen-Serie", c.title);
-        assertEquals("opengym://stats", c.link);
+        assertEquals("protrax://stats", c.link);
     }
 
     @Test
@@ -38,18 +38,18 @@ public class WidgetContentTest {
         WidgetContent c = WidgetContent.of("next", snap(), TODAY, "empty");
         assertEquals("Legs", c.value);
         assertEquals("Friday", c.caption);
-        assertEquals("opengym://start?r=r2", c.link);
+        assertEquals("protrax://start?r=r2", c.link);
         // A day later the snapshot's "done" no longer counts, and a past day is never next.
         assertEquals("Legs", WidgetContent.of("next", snap(), "2026-10-16", "").value);
         assertEquals("Heute", WidgetContent.of("next", snap(), "2026-10-16", "").caption);
-        assertEquals("opengym://home", WidgetContent.of("next", snap(), "2026-10-20", "").link);
+        assertEquals("protrax://home", WidgetContent.of("next", snap(), "2026-10-20", "").link);
     }
 
     @Test
     public void weightWeekRecordsVolume() throws Exception {
         WidgetContent w = WidgetContent.of("weight", snap(), TODAY, "");
         assertEquals("86 kg", w.value);
-        assertEquals("opengym://weigh-in", w.link);
+        assertEquals("protrax://weigh-in", w.link);
         assertArrayEquals(new double[] {88, 87, 86}, w.trend, 0.001);
         assertEquals("1 / 2", WidgetContent.of("week", snap(), TODAY, "").value);
         // last week's snapshot: nothing done this week yet
@@ -67,7 +67,7 @@ public class WidgetContentTest {
         assertEquals("1 / 3", c.value);
         assertEquals("14 workouts this month · 7 / 14", c.caption);
         assertEquals("Challenges", c.title);
-        assertEquals("opengym://home", c.link);
+        assertEquals("protrax://home", c.link);
         // Switched off in the app (no block): a dash, never a crash.
         JSONObject off = snap();
         off.remove("challenges");
@@ -76,11 +76,12 @@ public class WidgetContentTest {
 
     @Test
     public void noSnapshotAndUnknownKinds() throws Exception {
-        WidgetContent c = WidgetContent.of("weight", null, TODAY, "Open openGym once");
-        assertEquals("Open openGym once", c.caption);
-        assertEquals("opengym://home", c.link);
+        WidgetContent c = WidgetContent.of("weight", null, TODAY, "Open ProTraX once");
+        assertEquals("Open ProTraX once", c.caption);
+        assertEquals("protrax://home", c.link);
         assertEquals("streak", WidgetContent.of("nonsense", snap(), TODAY, "").kind);
         assertEquals("week", WidgetContent.defaultSecond("streak"));
         assertEquals("streak", WidgetContent.defaultSecond("week"));
     }
 }
+

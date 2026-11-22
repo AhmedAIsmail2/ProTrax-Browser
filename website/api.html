@@ -43,7 +43,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
 .api-actions { margin-top: 26px; }
 .api-actions .btn svg { width: 17px; height: 17px; }
 .api-facts { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 20px; color: var(--fg-3); font-size: 13.5px; }
-.api-facts span::after { content: "Â·"; margin-left: 10px; color: var(--fg-3); }
+.api-facts span::after { content: "·"; margin-left: 10px; color: var(--fg-3); }
 .api-facts span:last-child::after { content: ""; margin-left: 0; }
 
 .api-sec { padding: 0; margin-top: clamp(46px, 7vw, 68px); }
@@ -253,10 +253,10 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
 
   <section class="api-sec" id="overview">
     <h2>Overview</h2>
-    <p class="sub">Passkey (WebAuthn) auth + per-user state storage for ProTraX. One Node file, no framework, JSON-file
+    <p class="sub">Passkey (WebAuthn) auth + per-user state storage for openGym. One Node file, no framework, JSON-file
        storage, HMAC-signed session cookies.</p>
     <div class="srv">
-  <div class="srv-row"><code>/</code><span>Same origin as the ProTraX web app (the normal deployment)</span></div>
+  <div class="srv-row"><code>/</code><span>Same origin as the openGym web app (the normal deployment)</span></div>
   <div class="srv-row"><code>https://opengym.example.com</code><span>Your self-hosted instance</span></div>
     </div>
     <div class="ov-grid">
@@ -267,7 +267,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </div>
   <div class="ov">
     <h3>Throttling</h3>
-<p>The <code>password</code> routes are counted per client address: at most 60 requests a minute across them, and wrong answers (a password, a reset code, an invite code on password signup, an e-mail address already in use) pause the address from the 21st on, for 30 s, doubling up to 15 min. Wrong passwords also pause the <i>account</i> they were tried against from the 6th on, for 1 min doubling up to 1 h (the same pause whether the account was named by its name or its e-mail), and an identifier that names no account is paused the same way, as typed. A password check counts from the moment it starts, so checks sent at once get no more tries than checks sent one by one. A paused caller gets <code>429 {&quot;error&quot;: â€¦, &quot;code&quot;: &quot;locked&quot;, &quot;retryAfter&quot;: &lt;s&gt;}</code> with a <code>Retry-After</code> header. Passkey sign-up and sign-in and the pairing routes are not throttled (their failures reach the audit log at most ten a minute per address). The two routes that redeem a one-time device link (tag <code>passkeys</code>) share the per-address budget, and wrong codes pause the address for link redemption only, from the 21st on, the way wrong reset codes do. Adding or removing a passkey in Settings (<code>POST /api/account/passkeys/options</code>, <code>DELETE /api/account/passkeys</code>) and making a device code (<code>POST /api/account/device-link</code>) spend the per-address budget too, and a current password given there as proof counts like one given at sign-in. The address is the socket's, or with <code>TRUST_PROXY=1</code> the one a trusted proxy put in <code>CF-Connecting-IP</code> / the last <code>X-Forwarded-For</code> entry / <code>X-Real-IP</code>; IPv6 clients are counted by /64. Counters live in memory and reset on restart.</p>
+<p>The <code>password</code> routes are counted per client address: at most 60 requests a minute across them, and wrong answers (a password, a reset code, an invite code on password signup, an e-mail address already in use) pause the address from the 21st on, for 30 s, doubling up to 15 min. Wrong passwords also pause the <i>account</i> they were tried against from the 6th on, for 1 min doubling up to 1 h (the same pause whether the account was named by its name or its e-mail), and an identifier that names no account is paused the same way, as typed. A password check counts from the moment it starts, so checks sent at once get no more tries than checks sent one by one. A paused caller gets <code>429 {&quot;error&quot;: …, &quot;code&quot;: &quot;locked&quot;, &quot;retryAfter&quot;: &lt;s&gt;}</code> with a <code>Retry-After</code> header. Passkey sign-up and sign-in and the pairing routes are not throttled (their failures reach the audit log at most ten a minute per address). The two routes that redeem a one-time device link (tag <code>passkeys</code>) share the per-address budget, and wrong codes pause the address for link redemption only, from the 21st on, the way wrong reset codes do. Adding or removing a passkey in Settings (<code>POST /api/account/passkeys/options</code>, <code>DELETE /api/account/passkeys</code>) and making a device code (<code>POST /api/account/device-link</code>) spend the per-address budget too, and a current password given there as proof counts like one given at sign-in. The address is the socket's, or with <code>TRUST_PROXY=1</code> the one a trusted proxy put in <code>CF-Connecting-IP</code> / the last <code>X-Forwarded-For</code> entry / <code>X-Real-IP</code>; IPv6 clients are counted by /64. Counters live in memory and reset on restart.</p>
   </div>
   <div class="ov">
     <h3>Sessions</h3>
@@ -275,7 +275,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </div>
   <div class="ov">
     <h3>CSRF</h3>
-<p>State-changing browser requests must come from the app's own origin. The server checks <code>Sec-Fetch-Site</code> (falling back to <code>Origin</code> vs the configured <code>ORIGIN</code>); a mismatch is refused with <code>403 {&quot;error&quot;:&quot;cross-origin request refused&quot;,&quot;code&quot;:&quot;origin-mismatch&quot;,&quot;expected&quot;:ORIGIN}</code> on any non-GET route, the passkey routes included. Exempt: <code>pair/redeem</code>, which the mobile app calls from its own origin (the code in the body is the credential, and the token comes back in the body, never as a cookie), and any request a Bearer token authenticates by itself: a valid session token, with no session cookie beside it, on any route but the sign-in ones â€” the four passkey routes, the password and reset-code routes and the two device-link routes, which act on the credential in the body, never on a Bearer. A cross-origin request whose Bearer does not buy the exemption is refused before any handler runs: <code>401 {&quot;error&quot;:&quot;not signed in&quot;}</code> when that Bearer does not verify and is the only credential (a paired app whose token was revoked or expired), the 403 otherwise. The passkey routes were exempt before, on the grounds that the challenge id is a credential; but it is bound to nothing else, so a hostile page could complete the attacker's own passkey sign-in in the victim's browser (login CSRF) and the answer set the victim's session to the attacker's account. The password routes are <b>not</b> exempt for the same reason: a hostile page knows a valid name and password of its own.</p>
+<p>State-changing browser requests must come from the app's own origin. The server checks <code>Sec-Fetch-Site</code> (falling back to <code>Origin</code> vs the configured <code>ORIGIN</code>); a mismatch is refused with <code>403 {&quot;error&quot;:&quot;cross-origin request refused&quot;,&quot;code&quot;:&quot;origin-mismatch&quot;,&quot;expected&quot;:ORIGIN}</code> on any non-GET route, the passkey routes included. Exempt: <code>pair/redeem</code>, which the mobile app calls from its own origin (the code in the body is the credential, and the token comes back in the body, never as a cookie), and any request a Bearer token authenticates by itself: a valid session token, with no session cookie beside it, on any route but the sign-in ones — the four passkey routes, the password and reset-code routes and the two device-link routes, which act on the credential in the body, never on a Bearer. A cross-origin request whose Bearer does not buy the exemption is refused before any handler runs: <code>401 {&quot;error&quot;:&quot;not signed in&quot;}</code> when that Bearer does not verify and is the only credential (a paired app whose token was revoked or expired), the 403 otherwise. The passkey routes were exempt before, on the grounds that the challenge id is a credential; but it is bound to nothing else, so a hostile page could complete the attacker's own passkey sign-in in the victim's browser (login CSRF) and the answer set the victim's session to the attacker's account. The password routes are <b>not</b> exempt for the same reason: a hostile page knows a valid name and password of its own.</p>
   </div>
   <div class="ov">
     <h3>Environment-dependent behavior</h3>
@@ -283,7 +283,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </div>
   <div class="ov">
     <h3>Conventions</h3>
-<ul><li>Every response body is JSON with <code>Cache-Control: no-store</code>. The one exception is <code>GET /api/media/{hash}</code>, which answers with the stored file itself (<code>Cache-Control: private, no-store</code>).</li><li>Errors are always <code>{&quot;error&quot;: &quot;&lt;human-readable message&gt;&quot;}</code>. The <code>password</code>, throttle and <code>media</code> routes add a stable <code>code</code> for the client to word in its own language.</li><li>Unknown method+path pairs return <code>404 {&quot;error&quot;:&quot;not found&quot;}</code>; an unhandled exception returns <code>500 {&quot;error&quot;:&quot;server error&quot;}</code>.</li><li>Every route that reads a request body requires <code>Content-Type: application/json</code> (a <code>charset</code> parameter is fine) and answers any other type with <code>415 {&quot;error&quot;:&quot;content-type must be application/json&quot;}</code> â€” the types a form can send are the ones that skip the CORS preflight, which is how a cross-site form reached these routes. A request with no body needs no Content-Type. A body that does not parse, or parses to anything but an object (<code>null</code>, a string, an array), is <code>400 {&quot;error&quot;:&quot;invalid json&quot;}</code> on every route that reads one; an empty body counts as <code>{}</code>. A body over 5 MiB is <code>413 {&quot;error&quot;:&quot;body too large&quot;}</code>; the rest of the upload is discarded so the answer reaches the client.</li><li>CORS: the request's <code>Origin</code> is reflected in <code>Access-Control-Allow-Origin</code> <b>without</b> <code>Allow-Credentials</code>, so cross-origin callers can only ever authenticate with a Bearer token, never with the cookie.</li></ul>
+<ul><li>Every response body is JSON with <code>Cache-Control: no-store</code>. The one exception is <code>GET /api/media/{hash}</code>, which answers with the stored file itself (<code>Cache-Control: private, no-store</code>).</li><li>Errors are always <code>{&quot;error&quot;: &quot;&lt;human-readable message&gt;&quot;}</code>. The <code>password</code>, throttle and <code>media</code> routes add a stable <code>code</code> for the client to word in its own language.</li><li>Unknown method+path pairs return <code>404 {&quot;error&quot;:&quot;not found&quot;}</code>; an unhandled exception returns <code>500 {&quot;error&quot;:&quot;server error&quot;}</code>.</li><li>Every route that reads a request body requires <code>Content-Type: application/json</code> (a <code>charset</code> parameter is fine) and answers any other type with <code>415 {&quot;error&quot;:&quot;content-type must be application/json&quot;}</code> — the types a form can send are the ones that skip the CORS preflight, which is how a cross-site form reached these routes. A request with no body needs no Content-Type. A body that does not parse, or parses to anything but an object (<code>null</code>, a string, an array), is <code>400 {&quot;error&quot;:&quot;invalid json&quot;}</code> on every route that reads one; an empty body counts as <code>{}</code>. A body over 5 MiB is <code>413 {&quot;error&quot;:&quot;body too large&quot;}</code>; the rest of the upload is discarded so the answer reaches the client.</li><li>CORS: the request's <code>Origin</code> is reflected in <code>Access-Control-Allow-Origin</code> <b>without</b> <code>Allow-Credentials</code>, so cross-origin callers can only ever authenticate with a Bearer token, never with the cookie.</li></ul>
   </div>
     </div>
   </section>
@@ -307,7 +307,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </summary>
   <div class="ep-body">
 <p>Always public. Also reports how many user accounts exist.</p>
-<p>The check writes: it creates and removes one empty file under <code>DATA_DIR</code>, because a server whose data directory is full or read-only has every write path broken while the port still answers. It is a 503 when that fails â€” the container healthcheck (<code>wget --spider</code>) reads the status and nothing else.</p>
+<p>The check writes: it creates and removes one empty file under <code>DATA_DIR</code>, because a server whose data directory is full or read-only has every write path broken while the port still answers. It is a 503 when that fails — the container healthcheck (<code>wget --spider</code>) reads the status and nothing else.</p>
 <p>The probe runs at most once every five seconds and the answer in between is the last one, so a poll can be that stale. The route is unauthenticated, and one disk write per request is not something to leave open to anyone.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Public: no authentication required.</span></p>
 
@@ -320,7 +320,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </div>
   <div class="prow rrow">
     <span class="r-code s5">503</span>
-    <span class="p-desc">The data directory could not be written â€” a full disk, or a mount that came back read-only. Nothing that stores anything will work until it is fixed; the reason is in the container log.</span>
+    <span class="p-desc">The data directory could not be written — a full disk, or a mount that came back read-only. Nothing that stores anything will work until it is fixed; the reason is in the container log.</span>
   </div>
     </div>
   </div>
@@ -461,7 +461,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </div>
   <div class="prow rrow">
     <span class="r-code s4">400</span>
-    <span class="p-desc">Challenge expired/replayed, or the attestation did not verify (wrong origin/RP ID, malformed responseâ€¦). The message is human-readable.<span class="r-sig"><code>{&quot;error&quot;:&quot;challenge expired, try again&quot;}</code></span></span>
+    <span class="p-desc">Challenge expired/replayed, or the attestation did not verify (wrong origin/RP ID, malformed response…). The message is human-readable.<span class="r-sig"><code>{&quot;error&quot;:&quot;challenge expired, try again&quot;}</code></span></span>
   </div>
   <div class="prow rrow">
     <span class="r-code s4">403</span>
@@ -655,7 +655,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
     <span class="ep-sum">Mint a pairing code for the mobile app</span>
   </summary>
   <div class="ep-body">
-<p>Called from an already signed-in browser tab (Settings â†’ &quot;Pair the mobile app&quot;). Returns an 8-character code (alphabet without 0/O/1/I) the phone redeems within 5 minutes via /api/pair/redeem. One-shot. One live code per profile: minting a new one retires the previous one. Same proof as a device link (a passkey assertion made for this request, or the current password while password sign-in is on), since the phone token a code turns into is renewed for as long as it is used. Audited as <code>auth.pair.create</code>.</p>
+<p>Called from an already signed-in browser tab (Settings → &quot;Pair the mobile app&quot;). Returns an 8-character code (alphabet without 0/O/1/I) the phone redeems within 5 minutes via /api/pair/redeem. One-shot. One live code per profile: minting a new one retires the previous one. Same proof as a device link (a passkey assertion made for this request, or the current password while password sign-in is on), since the phone token a code turns into is renewed for as long as it is used. Audited as <code>auth.pair.create</code>.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
 
 <p class="ep-h">Request body</p><p class="p-desc"><a href="#schema-OwnerProof">OwnerProof</a></p>
@@ -735,7 +735,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
     <span class="ep-sum">A pairing code for a Zepp OS watch</span>
   </summary>
   <div class="ep-body">
-<p>A signed-in device asks for a code that the Zepp app's settings page for ProTraX redeems (<code>POST /api/watch/redeem</code>). 12 characters typed as <code>XXXX-XXXX-XXXX</code>, one per profile (a new one replaces the last), good for ten minutes, held only as a hash.</p>
+<p>A signed-in device asks for a code that the Zepp app's settings page for openGym redeems (<code>POST /api/watch/redeem</code>). 12 characters typed as <code>XXXX-XXXX-XXXX</code>, one per profile (a new one replaces the last), good for ten minutes, held only as a hash.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
 
 
@@ -761,7 +761,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
     <span class="ep-sum">Redeem a watch pairing code for a watch token</span>
   </summary>
   <div class="ep-body">
-<p>Called by the ProTraX watch app's Side Service inside the Zepp phone app. The code is the credential (CSRF-exempt, throttled per address like a device link). The answer is a watch token (<code>ogw_â€¦</code>) that opens <code>GET</code>/<code>POST /api/watch/box</code> and nothing else; it ends with &quot;sign out everywhere&quot;, a new password, a disabled account, an unlink, or 90 days without use.</p>
+<p>Called by the openGym watch app's Side Service inside the Zepp phone app. The code is the credential (CSRF-exempt, throttled per address like a device link). The answer is a watch token (<code>ogw_…</code>) that opens <code>GET</code>/<code>POST /api/watch/box</code> and nothing else; it ends with &quot;sign out everywhere&quot;, a new password, a disabled account, an unlink, or 90 days without use.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Public: no authentication required.</span></p>
 
 <p class="ep-h">Request body <span class="p-hint">(JSON)</span></p><div class="ptab">
@@ -1090,7 +1090,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
     <span class="ep-sum">Create a profile with a name and password</span>
   </summary>
   <div class="ep-body">
-<p>For browsers that cannot make a passkey (plain http on a LAN address, some Firefox setups). Creates the profile and signs it in. The same invite rules as passkey registration apply: on an invite-only instance the code is checked first, checked again after hashing, and burned. The password must be 10â€“256 characters and not one of the passwords guessing scripts try first; no two profiles with a password may share a name. An optional <code>email</code> is stored as the profile's sign-in e-mail (see <code>POST /api/account/email</code>); one that is not an address is refused with <code>400 email-invalid</code>, one that is in use with <code>409 email-taken</code>. Both are asked only after the hash and the second invite check, so without a valid code it is never answered, which counts against the caller's address like a wrong invite code. <b>Not</b> CSRF-exempt.</p>
+<p>For browsers that cannot make a passkey (plain http on a LAN address, some Firefox setups). Creates the profile and signs it in. The same invite rules as passkey registration apply: on an invite-only instance the code is checked first, checked again after hashing, and burned. The password must be 10–256 characters and not one of the passwords guessing scripts try first; no two profiles with a password may share a name. An optional <code>email</code> is stored as the profile's sign-in e-mail (see <code>POST /api/account/email</code>); one that is not an address is refused with <code>400 email-invalid</code>, one that is in use with <code>409 email-taken</code>. Both are asked only after the hash and the second invite check, so without a valid code it is never answered, which counts against the caller's address like a wrong invite code. <b>Not</b> CSRF-exempt.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Public: no authentication required.</span></p>
 
 <p class="ep-h">Request body <span class="p-hint">(JSON)</span></p><div class="ptab">
@@ -1362,7 +1362,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   </summary>
   <div class="ep-body">
 <p>An e-mail address to type at <code>POST /api/login/password</code> instead of the profile name. No mail is ever sent to it (there is no verification and no reset mail; resets stay the admin's one-time code), so it is only an identifier. Stored trimmed, NFKC-normalised and lower-cased; at most 254 characters; unique across every profile, and never another password-holding profile's name. An empty or null <code>email</code> removes it (as <code>DELETE</code> does).</p>
-<p>The body carries the same proof as setting a password (see OwnerProof): a session alone is never enough. Saving the address the profile already has answers 200 with no proof asked. An address in use by another profile is refused only after the proof, with <code>409 email-taken</code>, and counts against the caller's address and account (20 free, then 30 s doubling to 15 min), so the answer never costs less than a passkey prompt or a password check, and runs out after a few tries. It says an address is in use somewhere on this instance, never by whom. Audited as <code>auth.email.set</code> / <code>auth.email.change</code> with the address masked (<code>aâ€¦@eâ€¦</code>).</p>
+<p>The body carries the same proof as setting a password (see OwnerProof): a session alone is never enough. Saving the address the profile already has answers 200 with no proof asked. An address in use by another profile is refused only after the proof, with <code>409 email-taken</code>, and counts against the caller's address and account (20 free, then 30 s doubling to 15 min), so the answer never costs less than a passkey prompt or a password check, and runs out after a few tries. It says an address is in use somewhere on this instance, never by whom. Audited as <code>auth.email.set</code> / <code>auth.email.change</code> with the address masked (<code>a…@e…</code>).</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
 
 <p class="ep-h">Request body <span class="p-hint">(JSON)</span></p>
@@ -1845,8 +1845,8 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="ep-body">
 <p>Replaces the stored state wholesale (atomic write; there is no merge on the server). The <code>active</code> field (an in-progress workout) is stripped before saving: a running session belongs to the device running it. Body limit 5 MiB.</p>
 <p>With <code>baseRev</code> the write is conditional: it goes through only when <code>baseRev</code> equals the document's current revision, and answers 409 with the current document otherwise; the client merges the two and pushes again with the revision it was given. Without <code>baseRev</code> the write is unconditional (clients from before revisions, and deliberate replaces such as a backup import). The server stamps the new revision into the document as <code>_rev</code>; a <code>_rev</code> sent by the client is ignored.</p>
-<p>The records of removals (<code>deleted</code>) and of edits (<code>edited</code>) never shrink: the stored ones are joined into the write (a reset keeps its own). A writer that does not stamp its own changes (no <code>stamped: true</code>; an API script, an older app) and sends the current <code>baseRev</code> gets them stamped by the server, at the server's time: every entry it removed (a workout, routine, custom exercise, weigh-in, card, profile or favourite), every setting and plan day it changed (<code>queue</code>, <code>week.&lt;day&gt;</code>, â€¦), and every entry it edited (<code>_ts</code>, per field <code>_f</code>). That keeps a planner's new week, or a routine it removed, from being undone by a phone that reconnects later with an older change. A setting, plan day or entry field whose stored stamp (<code>edited</code>, <code>_f</code>) is later than the one the writer sends back keeps the stored value: the writer never saw that change, so send back the <code>edited</code> and <code>_f</code> you read. A writer that sends no <code>edited</code> at all is not held to it. An entry the document holds while a removal on record says it was deleted after its last edit is kept and marked as added back.</p>
-<p>Such a writer also cannot delete what it does not know: a field of the stored document, of a stored routine, workout, custom exercise, card or profile, of a routine's exercise, or of a logged exercise or set that its copy leaves out comes back from the stored copy (an older app rebuilds an exercise from the fields it knows, which dropped pyramid sets made on an updated device). Only the fields v1.3.9 itself removes (a superset link, a note, a cleared set value, â€¦) can be removed this way. Send <code>stamped: true</code> to remove anything else.</p>
+<p>The records of removals (<code>deleted</code>) and of edits (<code>edited</code>) never shrink: the stored ones are joined into the write (a reset keeps its own). A writer that does not stamp its own changes (no <code>stamped: true</code>; an API script, an older app) and sends the current <code>baseRev</code> gets them stamped by the server, at the server's time: every entry it removed (a workout, routine, custom exercise, weigh-in, card, profile or favourite), every setting and plan day it changed (<code>queue</code>, <code>week.&lt;day&gt;</code>, …), and every entry it edited (<code>_ts</code>, per field <code>_f</code>). That keeps a planner's new week, or a routine it removed, from being undone by a phone that reconnects later with an older change. A setting, plan day or entry field whose stored stamp (<code>edited</code>, <code>_f</code>) is later than the one the writer sends back keeps the stored value: the writer never saw that change, so send back the <code>edited</code> and <code>_f</code> you read. A writer that sends no <code>edited</code> at all is not held to it. An entry the document holds while a removal on record says it was deleted after its last edit is kept and marked as added back.</p>
+<p>Such a writer also cannot delete what it does not know: a field of the stored document, of a stored routine, workout, custom exercise, card or profile, of a routine's exercise, or of a logged exercise or set that its copy leaves out comes back from the stored copy (an older app rebuilds an exercise from the fields it knows, which dropped pyramid sets made on an updated device). Only the fields v1.3.9 itself removes (a superset link, a note, a cleared set value, …) can be removed this way. Send <code>stamped: true</code> to remove anything else.</p>
 <p>Every accepted write also starts the grace period of each stored file (tag <code>media</code>) the new state no longer references, and stops it for each one it references again. That bookkeeping never changes the answer.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
 
@@ -2128,7 +2128,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
     <span class="ep-sum">Schedule a server-side rest-timer push</span>
   </summary>
   <div class="ep-body">
-<p>Schedules one push after <code>seconds</code> (a number or numeric string â‰¥ 1, clamped to 3600). One pending timer per device, keyed by <code>deviceId</code>, the same token the subscription was registered with; a new call from the same device replaces it, and the push goes only to that device's subscriptions. Without a <code>deviceId</code> there is one timer per account and the push goes to every subscription, as before. The client schedules this on rest start/extend and cancels on skip or on-screen completion. The push only actually fires when the tab was backgrounded/suspended and never got to cancel it. Timers live in memory: an API restart drops them.</p>
+<p>Schedules one push after <code>seconds</code> (a number or numeric string ≥ 1, clamped to 3600). One pending timer per device, keyed by <code>deviceId</code>, the same token the subscription was registered with; a new call from the same device replaces it, and the push goes only to that device's subscriptions. Without a <code>deviceId</code> there is one timer per account and the push goes to every subscription, as before. The client schedules this on rest start/extend and cancels on skip or on-screen completion. The push only actually fires when the tab was backgrounded/suspended and never got to cancel it. Timers live in memory: an API restart drops them.</p>
     <p class="ep-auth"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span>Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.</span></p>
 
 <p class="ep-h">Request body <span class="p-hint">(JSON)</span></p><div class="ptab">
@@ -2539,7 +2539,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">refine</span>
     <span class="p-type">string <span class="p-hint">(&le; 4000 chars)</span></span>
-    <span class="p-desc">A change asked for in plain words, applied to the proposal now waiting. Cut to the instance's <code>maxMessageLen</code> (1000 unless the admin changed it; 200â€“4000).</span>
+    <span class="p-desc">A change asked for in plain words, applied to the proposal now waiting. Cut to the instance's <code>maxMessageLen</code> (1000 unless the admin changed it; 200–4000).</span>
   </div>
   <div class="prow">
     <span class="p-name">lang</span>
@@ -2603,7 +2603,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">note</span>
     <span class="p-type">string <span class="p-hint">(&le; 4000 chars)</span></span>
-    <span class="p-desc">Anything the profile wants the Coach to know this time round. Cut to the instance's <code>maxMessageLen</code> (1000 unless the admin changed it; 200â€“4000).</span>
+    <span class="p-desc">Anything the profile wants the Coach to know this time round. Cut to the instance's <code>maxMessageLen</code> (1000 unless the admin changed it; 200–4000).</span>
   </div>
   <div class="prow">
     <span class="p-name">lang</span>
@@ -3006,7 +3006,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
 
 <section class="api-sec" id="integrations">
   <h2>Integrations</h2>
-  <p class="sub">Settings â†’ Integrations: outbound webhooks now, more providers later. Off unless the server runs with <code>INTEGRATIONS</code> (e.g. <code>INTEGRATIONS=webhook</code>); then a profile can add its own connections. Secrets are sealed at rest and shown once. See docs/INTEGRATIONS.md.</p>
+  <p class="sub">Settings → Integrations: outbound webhooks now, more providers later. Off unless the server runs with <code>INTEGRATIONS</code> (e.g. <code>INTEGRATIONS=webhook</code>); then a profile can add its own connections. Secrets are sealed at rest and shown once. See docs/INTEGRATIONS.md.</p>
   <div class="eps">
 
 <details class="ep" id="op-listIntegrations">
@@ -4069,7 +4069,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
 </div>
 <pre><code>{
   &quot;type&quot;: &quot;apikey&quot;,
-  &quot;token&quot;: &quot;sk-â€¦&quot;,
+  &quot;token&quot;: &quot;sk-…&quot;,
   &quot;account&quot;: &quot;team@example.com&quot;
 }</code></pre>
     <p class="ep-h">Responses</p>
@@ -4255,7 +4255,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">code</span>
     <span class="p-type">string</span>
-    <span class="p-desc">A stable reason on the password, throttle and media routes, for a client to word in its own language (<code>bad-credentials</code>, <code>locked</code>, <code>too-short</code>, <code>media-quota</code>, â€¦). Media refusals add the numbers to word it with (<code>maxMB</code>, <code>maxSec</code>, <code>usedMB</code>, <code>quotaMB</code>).</span>
+    <span class="p-desc">A stable reason on the password, throttle and media routes, for a client to word in its own language (<code>bad-credentials</code>, <code>locked</code>, <code>too-short</code>, <code>media-quota</code>, …). Media refusals add the numbers to word it with (<code>maxMB</code>, <code>maxSec</code>, <code>usedMB</code>, <code>quotaMB</code>).</span>
   </div>
   <div class="prow">
     <span class="p-name">retryAfter</span>
@@ -4652,7 +4652,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">edited</span>
     <span class="p-type">object</span>
-    <span class="p-desc">When each setting and plan day was last changed, ms ({ queue: ms, 'week.3': ms, â€¦ }). Never shrinks on the server; stamped for writers that do not stamp (see PUT /api/data).</span>
+    <span class="p-desc">When each setting and plan day was last changed, ms ({ queue: ms, 'week.3': ms, … }). Never shrinks on the server; stamped for writers that do not stamp (see PUT /api/data).</span>
   </div>
   <div class="prow">
     <span class="p-name">unit</span>
@@ -4662,7 +4662,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">lang</span>
     <span class="p-type">string</span>
-    <span class="p-desc">UI language code (&quot;en&quot;, &quot;de&quot;, &quot;pt&quot;, â€¦); also localizes pushes.</span>
+    <span class="p-desc">UI language code (&quot;en&quot;, &quot;de&quot;, &quot;pt&quot;, …); also localizes pushes.</span>
   </div>
   <div class="prow">
     <span class="p-name">theme</span>
@@ -4692,12 +4692,12 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">week</span>
     <span class="p-type">object</span>
-    <span class="p-desc">Weekly plan: weekday (0=Sunday â€¦ 6) â†’ routine id.</span>
+    <span class="p-desc">Weekly plan: weekday (0=Sunday … 6) → routine id.</span>
   </div>
   <div class="prow">
     <span class="p-name">dayPlan</span>
     <span class="p-type">object</span>
-    <span class="p-desc">Per-date overrides: ISO date â†’ routine id, or &quot;rest&quot;. Wins over <code>week</code>.</span>
+    <span class="p-desc">Per-date overrides: ISO date → routine id, or &quot;rest&quot;. Wins over <code>week</code>.</span>
   </div>
   <div class="prow">
     <span class="p-name">bodyweight</span>
@@ -4707,12 +4707,12 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">customEx</span>
     <span class="p-type"><a href="#schema-CustomExercise">CustomExercise</a>[]</span>
-    <span class="p-desc">User-created exercises (id, name, musclesâ€¦).</span>
+    <span class="p-desc">User-created exercises (id, name, muscles…).</span>
   </div>
   <div class="prow">
     <span class="p-name">exWeights</span>
     <span class="p-type">object</span>
-    <span class="p-desc">Per-exercise last/best weight memory: exercise id â†’ {w, d}.</span>
+    <span class="p-desc">Per-exercise last/best weight memory: exercise id → {w, d}.</span>
   </div>
   <div class="prow">
     <span class="p-name">reminder</span>
@@ -4752,7 +4752,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">settings</span>
     <span class="p-type">object</span>
-    <span class="p-desc">Catch-all note: the remaining top-level keys (sound, keepAwake, gifSize, targetW, autoBackup, â€¦) are flat settings values like the ones above.</span>
+    <span class="p-desc">Catch-all note: the remaining top-level keys (sound, keepAwake, gifSize, targetW, autoBackup, …) are flat settings values like the ones above.</span>
   </div>
 </div>
   </div>
@@ -5060,7 +5060,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">vol</span>
     <span class="p-type">number</span>
-    <span class="p-desc">Total volume (Î£ weight Ã— reps).</span>
+    <span class="p-desc">Total volume (Σ weight × reps).</span>
   </div>
   <div class="prow">
     <span class="p-name">prs</span>
@@ -5226,7 +5226,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">gone</span>
     <span class="p-type">object</span>
-    <span class="p-desc">Weigh-ins removed from a day that keeps others, id â†’ when (ms).</span>
+    <span class="p-desc">Weigh-ins removed from a day that keeps others, id → when (ms).</span>
   </div>
 </div>
   </div>
@@ -6127,7 +6127,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
   <div class="prow">
     <span class="p-name">maxMessageLen</span>
     <span class="p-type">integer</span>
-    <span class="p-desc">How long a chat message, refinement or review note can be (200â€“4000, default 1000).</span>
+    <span class="p-desc">How long a chat message, refinement or review note can be (200–4000, default 1000).</span>
   </div>
   <div class="prow">
     <span class="p-name">community</span>
@@ -6272,7 +6272,7 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
 </main>
 
 <footer><div class="wrap foot">
-  <span class="c">ProTraX Â· AGPL-3.0 Â· Â© 2026 <a href="https://duarte-santos.ch" rel="noopener">Duarte Santos</a></span>
+  <span class="c">ProTraX · AGPL-3.0 · © 2026 <a href="https://duarte-santos.ch" rel="noopener">Duarte Santos</a></span>
   <div class="links">
     <a href="docs.html">Docs</a>
     <a href="about.html">About</a>
@@ -6315,3 +6315,4 @@ document.querySelectorAll('[data-xall]').forEach(b => b.addEventListener('click'
 </script>
 </body>
 </html>
+
