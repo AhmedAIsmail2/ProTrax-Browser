@@ -50,7 +50,7 @@ test('owed once per user and year, with a workout that year, not switched off, n
 });
 
 test('the push is fixed words and the year: nothing from the profile rides along', () => {
-  assert.deepEqual(wrappedPush('en', 2026), { title: 'Your 2026 in openGym is ready 🎉', body: 'Workouts, records and one very honest personality test. Tap to see your year.', tag: 'wrapped' });
+  assert.deepEqual(wrappedPush('en', 2026), { title: 'Your 2026 in ProTraX is ready 🎉', body: 'Workouts, records and one very honest personality test. Tap to see your year.', tag: 'wrapped' });
   const de = wrappedPush('de', 2026);
   assert.match(de.title, /2026/);
   assert.notEqual(de.title, wrappedPush('en', 2026).title);
@@ -65,3 +65,4 @@ test('api/wrapped-copy.js matches the frontend strings (node scripts/build-wrapp
   assert.equal(fs.readFileSync(path.join(API, 'wrapped-copy.js'), 'utf8'), await buildWrappedCopy(),
     'api/wrapped-copy.js is out of date: run node scripts/build-wrapped-copy.mjs in api/');
 });
+
