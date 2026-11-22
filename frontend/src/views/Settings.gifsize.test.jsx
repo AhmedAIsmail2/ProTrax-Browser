@@ -42,7 +42,7 @@ vi.mock('../lib/mobile.js', () => ({ MOBILE: false, isAndroid: () => Promise.res
 vi.mock('./MobileOnboarding.jsx', () => ({ ConnectSheet: () => null }))
 vi.mock('../sheets.jsx', () => ({
   starterPlanSheet: vi.fn(), confirmSheet: vi.fn(), importFromApp: vi.fn(),
-  importFromHevy: vi.fn(), importHubSheet: vi.fn(), equipmentProfileSheet: vi.fn(),
+  importFromHevy: vi.fn(), equipmentProfileSheet: vi.fn(),
 }))
 
 // The Settings view reads the build-time version constant at render time.
@@ -63,7 +63,7 @@ afterEach(() => {
   host.remove()
 })
 
-const mount = () => act(() => root.render(<Settings />))
+const mount = () => act(() => root.render(<Settings page="workout" />))
 const segButton = label => [...host.querySelectorAll('.seg button')].find(b => b.textContent === label)
 
 describe('Settings — exercise animations', () => {

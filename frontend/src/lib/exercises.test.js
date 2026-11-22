@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchExercise, normalizeStr } from './exercises.js'
+import { matchExercise, normalizeStr, byCategory } from './exercises.js'
 import { _setLangState } from './i18n-core.js'
 
 describe('normalizeStr', () => {
@@ -84,35 +84,103 @@ describe('matchExercise', () => {
   })
 
   it('matches translated UI terms when a language is active', () => {
-    _setLangState('es', {
-      chest: 'pecho',
+    _setLangState('pt', {
+      chest: 'peito',
       barbell: 'barra',
-      dumbbell: 'mancuernas',
-      shoulders: 'hombros'
+      dumbbell: 'halteres',
+      shoulders: 'ombros'
     }, null)
 
-    // "pecho" is the translated bp, "barra" is the translated eq
-    expect(matchExercise(benchPress, 'pecho')).toBe(true)
+    // "peito" is the translated bp, "barra" is the translated eq
+    expect(matchExercise(benchPress, 'peito')).toBe(true)
     expect(matchExercise(benchPress, 'barra')).toBe(true)
-    expect(matchExercise(benchPress, 'pecho barra bench')).toBe(true)
-    expect(matchExercise(lateralRaise, 'mancuernas hombros')).toBe(true)
+    expect(matchExercise(benchPress, 'peito barra bench')).toBe(true)
+    expect(matchExercise(lateralRaise, 'halteres ombros')).toBe(true)
   })
 
-  it('matches common gym acronyms and machine aliases', () => {
-    const rdl = { id: '0032', n: 'barbell romanian deadlift', bp: 'upper legs', eq: 'barbell', tg: 'hamstrings' }
-    const ohp = { id: '0041', n: 'barbell overhead press', bp: 'shoulders', eq: 'barbell', tg: 'delts' }
-    const chestMachine = { id: '0523', n: 'lever chest press', bp: 'chest', eq: 'leverage machine', tg: 'pectorals' }
-    const pecDeck = { id: '0528', n: 'lever seated fly', bp: 'chest', eq: 'leverage machine', tg: 'pectorals' }
-    const dbCurl = { id: '0285', n: 'dumbbell biceps curl', bp: 'upper arms', eq: 'dumbbell', tg: 'biceps' }
+  // The pt-BR exercise-name pack (!16) renames the catalogue in the UI. Searching has to reach
+  // that name as well as the canonical English one, or the library goes dark for pt-BR profiles
+  // the moment they type what they see on screen.
+  it('matches the localized exercise name as well as the English one', () => {
+    _setLangState('pt-BR', {}, null, { '0025': 'supino reto com barra' })
 
-    expect(matchExercise(rdl, 'rdl')).toBe(true)
-    expect(matchExercise(ohp, 'ohp')).toBe(true)
-    expect(matchExercise(chestMachine, 'machine')).toBe(true)
-    expect(matchExercise(chestMachine, 'machine chest')).toBe(true)
-    expect(matchExercise(pecDeck, 'pec deck')).toBe(true)
-    expect(matchExercise(dbCurl, 'db curl')).toBe(true)
-    expect(matchExercise(dbCurl, 'bicep')).toBe(true)
+    expect(matchExercise(benchPress, 'supino')).toBe(true)
+    expect(matchExercise(benchPress, 'supino barra')).toBe(true)
+    expect(matchExercise(benchPress, 'bench press')).toBe(true)   // English still reaches it
+    expect(matchExercise(lateralRaise, 'supino')).toBe(false)     // untranslated entry unaffected
+  })
+
+  it('rebuilds the cached haystack when the language changes', () => {
+    _setLangState('pt-BR', {}, null, { '0025': 'supino reto com barra' })
+    expect(matchExercise(benchPress, 'supino')).toBe(true)
+
+    _setLangState('en', null, null, null)
+    expect(matchExercise(benchPress, 'supino')).toBe(false)
+    expect(matchExercise(benchPress, 'bench')).toBe(true)
   })
 })
 
+// Four sled press names came in from the dataset with the degree sign's UTF-8 bytes read as
+// cp1251 ("45в°"): they showed that way everywhere, and a search for 45° missed them.
+describe('the exercise dataset', () => {
+  it('has no names garbled by a wrong text encoding', async () => {
+    const { EXDB } = await import('./exercises-data.js')
+    const garbled = EXDB.filter(e => /в°|Ã|Â|â€/.test(e.n)).map(e => e.id + ' ' + e.n)
+    expect(garbled).toEqual([])
+    expect(EXDB.find(e => e.id === '0739').n).toBe('sled 45° leg press')
+  })
 
+  it('finds the sled presses by their angle', async () => {
+    const { EXDB } = await import('./exercises-data.js')
+    const found = EXDB.filter(e => matchExercise(e, '45° leg press')).map(e => e.id)
+    expect(found).toEqual(expect.arrayContaining(['0739', '1464', '0740']))
+  })
+})
+
+describe('search: the everyday version first', () => {
+  it('"leg press" finds the 45° sled leg press before the Smith and one-leg versions', async () => {
+    const { EXDB, searchExercises } = await import('./exercises.js')
+    expect(searchExercises(EXDB, 'leg press')[0].id).toBe('0739')
+    expect(searchExercises(EXDB, 'smith leg press')[0].id).toBe('0760')
+  })
+})
+
+// The Type chip row's filter (issue #521), shared by the Library and the exercise picker.
+describe('byCategory', () => {
+  const list = [{ id: 'a', cat: 'stretching' }, { id: 'b', cat: 'strength' }, { id: 'c' }]
+  it('offers the types present, in the fixed order, and narrows to the chosen one', () => {
+    expect(byCategory(list, '')).toEqual({ opts: ['strength', 'stretching'], on: '', list })
+    expect(byCategory(list, 'stretching')).toEqual({ opts: ['strength', 'stretching'], on: 'stretching', list: [list[0]] })
+  })
+  it('ignores a type the list has none of instead of showing nothing', () => {
+    expect(byCategory(list, 'yoga')).toEqual({ opts: ['strength', 'stretching'], on: '', list })
+  })
+})
+
+// European Portuguese and Swedish names (v1.4.4): what a lifter in Lisbon or Gothenburg types
+// finds the exercise on screen, with or without the accents, and the English still works.
+describe('search with the pt and sv exercise-name packs', async () => {
+  const { EXDB } = await import('./exercises-data.js')
+  const { searchExercises } = await import('./exercises.js')
+  const pt = (await import('../exercise-names/pt.js')).default
+  const sv = (await import('../exercise-names/sv.js')).default
+  const ids = (q) => searchExercises(EXDB, q).map(e => e.id)
+
+  it.each([
+    ['pt', 'supino com barra', '0025'],
+    ['pt', 'peso morto barra', '0032'],
+    ['pt', 'gemeos sentado', '0088'],
+    ['sv', 'bänkpress skivstång', '0025'],
+    ['sv', 'marklyft', '0032'],
+    ['sv', 'bankpress', '0025'],
+    ['sv', 'sittande vadpress', '0088'],
+  ])('%s: "%s" finds the exercise', (lang, query, id) => {
+    _setLangState(lang, {}, null, { pt, sv }[lang])
+    try {
+      expect(ids(query)).toContain(id)
+      expect(ids('bench press')).toContain('0025')
+    } finally {
+      _setLangState('en', null, null, null)
+    }
+  })
+})

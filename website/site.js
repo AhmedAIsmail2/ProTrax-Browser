@@ -1,15 +1,18 @@
-// Behaviour for the SmiTriX site: the header's navigation sheet, the contents
+// Behaviour for the ProTraX site: the header's navigation sheet, the contents
 // drawer and its scrollspy, the scroll reveals, the demo frame, and the two things
-// that come from the GitLab API (repo counts, release timeline).
-// Every one of them fails soft — the page is complete without any of this running.
+// that come from the GitHub API (repo counts, release timeline).
+// Every one of them fails soft: the page is complete without any of this running.
 
-const GL_PROJECT = 'https://gitlab.com/api/v4/projects/jogdandasmit%2FSmiTriX'
+const GH_REPO = 'https://api.github.com/repos/DuarteSantos8/openGym'
 
 // Discord publishes an invite's guild counts to anyone who asks for the invite with
-// ?with_counts=1 — no bot token, no widget to enable, and the API reflects the caller's
+// ?with_counts=1. No bot token, no widget to enable, and the API reflects the caller's
 // Origin, so the browser is allowed to read it. The code is the permanent invite in the
 // nav; if that invite is ever revoked this returns 404 and the count simply stays blank.
-const DC_INVITE = 'https://discord.com/api/v10/invites/ZFQV5dza9P?with_counts=1'
+const DC_INVITE = 'https://discord.com/api/v10/invites/e62jY6fwVb?with_counts=1'
+// The two network lookups below are decoration; they wait until the page is idle so they
+// never compete with the stylesheet, the hero image or the demo frame.
+const whenIdle = (fn) => ('requestIdleCallback' in window ? requestIdleCallback(fn, { timeout: 2500 }) : setTimeout(fn, 1200))
 
 /* ------------------------------------------------------- one panel controller
    The navigation sheet and the contents drawer are the same object with different
@@ -18,7 +21,7 @@ const DC_INVITE = 'https://discord.com/api/v10/invites/ZFQV5dza9P?with_counts=1'
    way the two of them can stay indistinguishable to a reader.
 
    Both are CLOSED in CSS, so a panel is shut on first paint whatever this script
-   does — and nothing is read back from storage to reopen one. */
+   does, and nothing is read back from storage to reopen one. */
 const FOCUSABLE = 'a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])'
 
 function panel({ opener, panelEl, flag, closeBtn }) {
@@ -48,10 +51,10 @@ function panel({ opener, panelEl, flag, closeBtn }) {
 
   opener.addEventListener('click', e => { e.stopPropagation(); set(!isOpen()) })
   panelEl.querySelector(closeBtn)?.addEventListener('click', () => set(false))
-  // Tapping a link inside navigates, so the panel has to get out of the way —
+  // Tapping a link inside navigates, so the panel has to get out of the way,
   // in-page anchors especially, which do not reload anything.
   panelEl.addEventListener('click', e => { if (e.target.closest('a')) set(false) })
-  // The scrim is body::after, so it has no element of its own to listen on — a click
+  // The scrim is body::after, so it has no element of its own to listen on. A click
   // that lands outside both the panel and its opener is a click on the scrim.
   document.addEventListener('click', e => {
     if (!isOpen()) return
@@ -79,7 +82,7 @@ function panel({ opener, panelEl, flag, closeBtn }) {
     opener: document.querySelector('.nav-toggle'),
     panelEl: document.getElementById('sitemenu'),
     flag: 'menu-open',
-    closeBtn: '.nl'          // the hamburger itself is the ✕; focus the first link
+    closeBtn: '.nl'          // the hamburger itself is the âœ•; focus the first link
   })
   const toc = panel({
     opener: document.querySelector('.toc-btn'),
@@ -95,6 +98,19 @@ function panel({ opener, panelEl, flag, closeBtn }) {
   // leave the page scroll-locked behind a sheet nobody can see.
   addEventListener('resize', () => { if (innerWidth >= 1000) nav?.set(false) })
 
+  // On a wide screen the docs and API pages show the contents as a fixed column
+  // (body.dock in styles.css). It is not a closed drawer there, so it must not be
+  // hidden from screen readers either.
+  const menu = document.getElementById('menu')
+  const wide = matchMedia('(min-width: 1200px)')
+  const syncDock = () => {
+    if (!menu || !document.body.classList.contains('dock')) return
+    if (wide.matches) { toc?.set(false); menu.setAttribute('aria-hidden', 'false') }
+    else if (!document.body.classList.contains('contents-open')) menu.setAttribute('aria-hidden', 'true')
+  }
+  syncDock()
+  wide.addEventListener?.('change', syncDock)
+
   // An earlier build remembered an open rail across visits. It no longer does, and
   // the stale key would otherwise sit in the browser forever.
   try { localStorage.removeItem('og_rail') } catch (e) {}
@@ -105,16 +121,13 @@ function panel({ opener, panelEl, flag, closeBtn }) {
    pages ship the byte-identical header the whole site is built around. Only links
    to a page (not to a section of one) can be "the page you are on". */
 ;(() => {
-  const norm = p => (p || '').split('?')[0].split('#')[0].replace(/\/index\.html$/, '').replace(/\/$/, '')
-  const here = norm(location.pathname)
+  const here = location.pathname.replace(/\/index\.html$/, '/')
   document.querySelectorAll('.nav-quick .ql, .navsheet .nl').forEach(a => {
     const href = a.getAttribute('href') || ''
-    if (href.startsWith('#') || /^https?:/.test(href)) return
-    try {
-      if (norm(new URL(a.href, location.origin).pathname) === here) {
-        a.setAttribute('aria-current', 'page')
-      }
-    } catch (e) {}
+    if (href.includes('#') || /^https?:/.test(href)) return
+    if (new URL(a.href).pathname.replace(/\/index\.html$/, '/') === here) {
+      a.setAttribute('aria-current', 'page')
+    }
   })
 })()
 
@@ -209,11 +222,11 @@ function panel({ opener, panelEl, flag, closeBtn }) {
 
   const mount = () => {
     if (slot.dataset.mounted) return
-    if (!slot.offsetParent) return                 // frame hidden — phone layout
+    if (!slot.offsetParent) return                 // frame hidden: phone layout
     slot.dataset.mounted = '1'
     const f = document.createElement('iframe')
     f.src = slot.dataset.demo
-    f.title = 'SmiTriX live demo'
+    f.title = 'ProTraX live demo'
     f.loading = 'lazy'
     f.style.cssText = 'width:100%;height:100%;border:0;display:block;border-radius:34px;background:#000'
     slot.appendChild(f)
@@ -229,47 +242,40 @@ function panel({ opener, panelEl, flag, closeBtn }) {
 })()
 
 /* ------------------------------------------------------- repo counts (nav + specs)
-   Points at gitlab.com while the GitHub account is suspended; switch the two API URLs
-   back to api.github.com once it is restored.
+   Back on api.github.com since 2026-09-11. GitHub is the home of the project again and
+   GitLab only mirrors it. Unauthenticated, 60 requests an hour per IP, which the
+   sessionStorage cache keeps us well under.
 
-   The cache keys carry a _gl suffix: a visitor with a still-warm sessionStorage entry
-   from the gitea era would otherwise be read with the old field names and show NaN. */
-;(async () => {
+   The cache keys carry a _gh2 suffix: a visitor with a still-warm entry from the GitLab
+   weeks would otherwise be read with the old field names and show NaN. */
+;whenIdle(async () => {
   const set = (id, v) => document.querySelectorAll('[data-gh="' + id + '"]').forEach(el => { el.textContent = v })
   try {
     let d = null
-    const cached = sessionStorage.getItem('repo_meta_gl')
+    const cached = sessionStorage.getItem('repo_meta_gh2')
     if (cached) d = JSON.parse(cached)
     else {
-      const r = await fetch(GL_PROJECT)
+      const r = await fetch(GH_REPO)
       if (!r.ok) return
       const j = await r.json()
-      // An unauthenticated project response carries star_count and forks_count and nothing
-      // else countable — open_issues_count is only there for a logged-in caller, so reading
-      // it here printed "undefined" on the live site. The issues endpoint answers it in the
-      // X-Total header instead, and GitLab lists that header in Access-Control-Expose-Headers,
-      // so the browser is allowed to read it. per_page=1 keeps the body to a single issue.
-      let issues = ''
-      try {
-        const ri = await fetch(GL_PROJECT + '/issues?state=opened&per_page=1')
-        if (ri.ok) issues = ri.headers.get('X-Total') || ''
-      } catch (e) { /* count stays blank rather than wrong */ }
-      d = { stars_count: j.star_count, forks_count: j.forks_count, open_issues_count: issues }
-      sessionStorage.setItem('repo_meta_gl', JSON.stringify(d))
+      // open_issues_count counts open pull requests too. GitHub's own repo header does the
+      // same, so the number matches what a visitor sees over there.
+      d = { stars_count: j.stargazers_count, forks_count: j.forks_count, open_issues_count: j.open_issues_count }
+      sessionStorage.setItem('repo_meta_gh2', JSON.stringify(d))
     }
-    set('stars', '★ ' + d.stars_count)
+    set('stars', 'â˜… ' + d.stars_count)
     set('stars-n', d.stars_count)
     set('forks-n', d.forks_count)
     // Leave the placeholder standing rather than writing an empty box.
     if (d.open_issues_count !== '' && d.open_issues_count != null) set('issues-n', d.open_issues_count)
-  } catch (e) { /* offline / rate-limited — leave placeholders */ }
-})()
+  } catch (e) { /* offline / rate-limited, leave placeholders */ }
+})
 
 /* --------------------------------------------------- Discord members (nav + specs)
    Same shape as the repo counts above, and just as optional: the placeholder next to
    the Discord link is empty, so a blocked or rate-limited request leaves the link
    reading exactly as it did before anyone counted anything. */
-;(async () => {
+;whenIdle(async () => {
   const set = (id, v) => document.querySelectorAll('[data-dc="' + id + '"]').forEach(el => { el.textContent = v })
   try {
     let n = null
@@ -287,30 +293,28 @@ function panel({ opener, panelEl, flag, closeBtn }) {
     const fmt = n.toLocaleString('en-US')
     set('members', fmt)
     set('members-n', fmt)
-  } catch (e) { /* offline / blocked — the link keeps its plain label */ }
-})()
+  } catch (e) { /* offline / blocked, the link keeps its plain label */ }
+})
 
 /* -------------------------------------------------------------- about timeline
-   Built from the published GitLab releases, so the page updates itself with every
+   Built from the published GitHub releases, so the page updates itself with every
    release. The static entries marked data-fallback stay in place when the API is
    unreachable; the hand-written first entry is always kept.
 
-   GitLab's release objects differ from Gitea's: the notes are `description` (not `body`),
-   the date is `released_at` (not `published_at`), the web link sits in `_links.self`, and
-   there is no draft/prerelease pair — a not-yet-released one is `upcoming_release`. */
+   Drafts and pre-releases are skipped; the notes are `body`, the date `published_at`. */
 ;(async () => {
   const tl = document.getElementById('milestones')
   if (!tl) return
   try {
     let rel = null
-    const cached = sessionStorage.getItem('repo_releases_gl')
+    const cached = sessionStorage.getItem('repo_releases_gh2')
     if (cached) rel = JSON.parse(cached)
     else {
-      const r = await fetch(GL_PROJECT + '/releases?per_page=100')
+      const r = await fetch(GH_REPO + '/releases?per_page=100')
       if (!r.ok) return
-      rel = (await r.json()).filter(x => !x.upcoming_release)
-        .map(x => ({ tag: x.tag_name, name: x.name, at: x.released_at, body: x.description || '', url: (x._links && x._links.self) || ('https://github.com/SmitroniX/SmiTriX/releases/tag/' + x.tag_name) }))
-      sessionStorage.setItem('repo_releases_gl', JSON.stringify(rel))
+      rel = (await r.json()).filter(x => !x.draft && !x.prerelease)
+        .map(x => ({ tag: x.tag_name, name: x.name || x.tag_name, at: x.published_at, body: x.body || '', url: x.html_url }))
+      sessionStorage.setItem('repo_releases_gh2', JSON.stringify(rel))
     }
     if (!rel.length) return
     const fmt = d => new Date(d).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })
@@ -322,19 +326,19 @@ function panel({ opener, panelEl, flag, closeBtn }) {
       let para = []
       for (let i = start; i < lines.length && lines[i].trim(); i++) para.push(lines[i].trim())
       const txt = para.join(' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`>]/g, '')
-      return txt.length > 220 ? txt.slice(0, 217).replace(/\s+\S*$/, '') + '…' : txt
+      return txt.length > 220 ? txt.slice(0, 217).replace(/\s+\S*$/, '') + 'â€¦' : txt
     }
     tl.querySelectorAll('[data-fallback]').forEach(el => el.remove())
-    for (const x of rel.slice().reverse()) {   // oldest → newest, matching the timeline
+    for (const x of rel.slice().reverse()) {   // oldest â†’ newest, matching the timeline
       const li = document.createElement('li')
       const title = x.name && x.name !== x.tag ? x.name : x.tag
       li.innerHTML = '<b></b><span class="when"></span><p></p>'
-      li.querySelector('b').textContent = title.startsWith(x.tag) ? title : x.tag + ' — ' + title
+      li.querySelector('b').textContent = title.startsWith(x.tag) ? title : x.tag + ': ' + title
       li.querySelector('.when').textContent = fmt(x.at)
       const p = li.querySelector('p')
       p.textContent = blurb(x.body) + ' '
       const a = document.createElement('a')
-      a.href = x.url; a.rel = 'noopener'; a.textContent = 'notes →'
+      a.href = x.url; a.rel = 'noopener'; a.textContent = 'notes â†’'
       p.appendChild(a)
       tl.appendChild(li)
     }
@@ -365,7 +369,7 @@ function panel({ opener, panelEl, flag, closeBtn }) {
   }
 })()
 
-/* The hero intro is armed in the inline <head> script, before the first paint — a deferred
+/* The hero intro is armed in the inline <head> script, before the first paint. A deferred
    script would arm it too late and the hero would flash. All this does is take the class off
    once the last element has landed, so nothing stays mid-animation. */
 ;(() => {
@@ -375,205 +379,4 @@ function panel({ opener, panelEl, flag, closeBtn }) {
   const last = document.querySelector('.hero-stage') || document.querySelector('.hero .actions')
   if (last) last.addEventListener('animationend', done, { once: true })
   setTimeout(done, 2400)   // if the animation never fires, do not leave the hero hidden
-})()
-
-/* --------------------------------------------------- latest release & download
-   Ensures the download button points to the GitHub latest release redirect URL
-   and updates the version and size metadata dynamically from GitHub API. */
-;(async () => {
-  const btn = document.querySelector('#download a.btn[download]')
-  if (!btn) return
-  // Always ensure the download button links directly to GitHub's latest release redirect
-  btn.href = 'https://github.com/SmitroniX/SmiTriX/releases/latest/download/SmiTriX.apk'
-  try {
-    sessionStorage.removeItem('smitrix_latest_release')
-    const res = await fetch('https://api.github.com/repos/SmitroniX/SmiTriX/releases/latest', { cache: 'no-cache' })
-    if (!res.ok) return
-    const rel = await res.json()
-    const apk = rel.assets?.find(a => a.name === 'SmiTriX.apk') ||
-                rel.assets?.find(a => /\.apk$/i.test(a.name) && !/unsigned/i.test(a.name))
-    const meta = btn.closest('.push')?.querySelector('p.meta') || document.querySelector('#download p.meta')
-    if (meta) {
-      const ver = rel.tag_name || 'v1.5.0'
-      const sizeMb = apk && apk.size ? (apk.size / (1024 * 1024)).toFixed(1) : '28.0'
-      meta.textContent = `${ver} · ${sizeMb} MB · Android 6.0+ · signed APK. Your browser will ask before installing; that is normal outside the Play Store.`
-    }
-    if (rel.body) {
-      const hashMatch = rel.body.match(/[a-f0-9]{64}/i)
-      const hashEl = document.getElementById('apkHashVal')
-      if (hashMatch && hashEl) hashEl.textContent = hashMatch[0].toLowerCase()
-    }
-  } catch (e) { /* fail soft: keep latest download link and static meta */ }
-})()
-
-/* --------------------------------------------------- dynamic accent theme
-   Allows visitors to preview SmiTriX in any of the 8 in-app accents (lime, sky,
-   orange, violet, pink, red, teal, gold). Stores choice in localStorage and
-   updates active swatch indicators across the page. */
-;(() => {
-  const swatches = document.querySelectorAll('[data-accent-pick]')
-  if (!swatches.length) return
-  const setAccent = (name, persist = true) => {
-    document.documentElement.setAttribute('data-accent', name)
-    swatches.forEach(btn => btn.classList.toggle('on', btn.dataset.accentPick === name))
-    if (persist) {
-      try { localStorage.setItem('smitrix_accent', name) } catch (e) {}
-    }
-  }
-  const saved = (() => {
-    try { return localStorage.getItem('smitrix_accent') } catch (e) { return null }
-  })()
-  if (saved) setAccent(saved, false)
-  swatches.forEach(btn => {
-    btn.addEventListener('click', () => setAccent(btn.dataset.accentPick))
-  })
-})()
-
-/* ----------------------------------------------- screenshots rail tabs & nav
-   Segmented tab controls and carousel arrows for desktop / touch screen.
-   Clicking a tab smoothly centers that screen in view; scrolling the rail updates
-   the active tab indicator. */
-;(() => {
-  const rail = document.querySelector('#screens .rail')
-  const tabs = document.querySelectorAll('.screen-tab')
-  const navBtns = document.querySelectorAll('.snav-btn')
-  if (!rail || !tabs.length) return
-
-  const figures = [...rail.querySelectorAll('figure')]
-  const getScreenPos = idx => {
-    const fig = figures[idx]
-    if (!fig) return 0
-    return fig.offsetLeft - (rail.clientWidth - fig.clientWidth) / 2
-  }
-
-  const selectTab = (idx, scroll = true) => {
-    tabs.forEach((t, i) => {
-      const active = i === idx
-      t.classList.toggle('on', active)
-      t.setAttribute('aria-selected', String(active))
-    })
-    figures.forEach((f, i) => f.classList.toggle('active-screen', i === idx))
-    if (scroll) {
-      rail.scrollTo({ left: getScreenPos(idx), behavior: 'smooth' })
-    }
-  }
-
-  tabs.forEach((tab, idx) => {
-    tab.addEventListener('click', () => selectTab(idx, true))
-  })
-
-  navBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const dir = Number(btn.dataset.sdir)
-      const curIdx = figures.findIndex(f => f.classList.contains('active-screen'))
-      const nextIdx = Math.max(0, Math.min(figures.length - 1, (curIdx >= 0 ? curIdx : 0) + dir))
-      selectTab(nextIdx, true)
-    })
-  })
-
-  let raf = 0
-  const syncActiveScreen = () => {
-    raf = 0
-    const center = rail.scrollLeft + rail.clientWidth / 2
-    let closestIdx = 0
-    let minDiff = Infinity
-    figures.forEach((fig, i) => {
-      const figCenter = fig.offsetLeft + fig.clientWidth / 2
-      const diff = Math.abs(center - figCenter)
-      if (diff < minDiff) {
-        minDiff = diff
-        closestIdx = i
-      }
-    })
-    tabs.forEach((t, i) => {
-      t.classList.toggle('on', i === closestIdx)
-      t.setAttribute('aria-selected', String(i === closestIdx))
-    })
-    figures.forEach((f, i) => f.classList.toggle('active-screen', i === closestIdx))
-  }
-
-  rail.addEventListener('scroll', () => {
-    if (!raf) raf = requestAnimationFrame(syncActiveScreen)
-  }, { passive: true })
-
-  selectTab(0, false)
-})()
-
-/* --------------------------------------------------- clipboard & toast helpers
-   Allows 1-click copying of the SHA-256 checksum and Docker compose run command,
-   with animated button state and transient floating toast notification. */
-;(() => {
-  const toast = document.getElementById('toast')
-  let toastTimer = null
-  const showToast = msg => {
-    if (!toast) return
-    toast.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg><span>${msg}</span>`
-    toast.classList.add('show')
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 2600)
-  }
-
-  const copyText = async (text, btn, successMsg) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      if (btn) {
-        btn.classList.add('copied')
-        const lbl = btn.querySelector('.copy-text')
-        const oldText = lbl ? lbl.textContent : ''
-        if (lbl) lbl.textContent = 'Copied!'
-        setTimeout(() => {
-          btn.classList.remove('copied')
-          if (lbl) lbl.textContent = oldText
-        }, 2000)
-      }
-      showToast(successMsg)
-    } catch (e) {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      try {
-        document.execCommand('copy')
-        showToast(successMsg)
-      } catch (err) {}
-      document.body.removeChild(ta)
-    }
-  }
-
-  const copyHashBtn = document.getElementById('copyHashBtn')
-  const apkHashVal = document.getElementById('apkHashVal')
-  if (copyHashBtn && apkHashVal) {
-    copyHashBtn.addEventListener('click', () => {
-      copyText(apkHashVal.textContent.trim(), copyHashBtn, 'SHA-256 hash copied to clipboard!')
-    })
-  }
-
-  const copyDockerBtn = document.getElementById('copyDockerBtn')
-  if (copyDockerBtn) {
-    copyDockerBtn.addEventListener('click', () => {
-      const cmd = 'docker run -d -p 8080:8080 --name smitrix ghcr.io/smitronix/smitrix:latest'
-      copyText(cmd, copyDockerBtn, 'Docker command copied to clipboard!')
-    })
-  }
-})()
-
-/* ---------------------------------------------------- floating back-to-top
-   Appears smoothly when scrolled past 400px; smooth-scrolls back to page top. */
-;(() => {
-  const btn = document.getElementById('backToTop')
-  if (!btn) return
-  let raf = 0
-  const checkY = () => {
-    raf = 0
-    btn.classList.toggle('visible', window.scrollY > 400)
-  }
-  window.addEventListener('scroll', () => {
-    if (!raf) raf = requestAnimationFrame(checkY)
-  }, { passive: true })
-  btn.addEventListener('click', () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  })
-  checkY()
 })()

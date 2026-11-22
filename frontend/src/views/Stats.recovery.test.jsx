@@ -5,7 +5,7 @@ import { Window } from 'happy-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EXIDX } from '../lib/exercises.js'
 import { MUSCLES, levelsOf } from '../lib/muscles.js'
-import { FATIGUE_STATES, STRENGTH_FLOOR } from '../lib/recovery.js'
+import { FATIGUE_STATES, STRENGTH_FLOOR, fatigueHalfLifeOf, FATIGUE_SETS_PER_UNIT, resolveSetRir } from '../lib/recovery.js'
 import { fatigueStateOf } from '../lib/recovery-view.js'
 import Stats from './Stats.jsx'
 import Modals from '../components/Modals.jsx'
@@ -19,12 +19,20 @@ const LEGACY_SNAPSHOT_ID = 'legacy-snapshot-only'
 
 const mocks = vi.hoisted(() => ({
   maps: [],
+  charts: [],
   mapMounts: 0,
+  exerciseHistorySheet: vi.fn(),
   S: {
     unit: 'kg', body: 'male', effort: 'rir', targetW: null,
     bodyweight: [], routines: [], workouts: [],
   },
 }))
+
+// Passed through untouched; the spy only counts how often the Effort card reads a set.
+vi.mock('../lib/recovery.js', async importOriginal => {
+  const actual = await importOriginal()
+  return { ...actual, resolveSetRir: vi.fn(actual.resolveSetRir) }
+})
 
 vi.mock('../store/useStore.js', () => ({
   useStore: selector => selector({ S: mocks.S }),
@@ -32,9 +40,13 @@ vi.mock('../store/useStore.js', () => ({
 vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }))
 vi.mock('../sheets.jsx', () => ({
   bwSheet: () => {}, goalSheet: () => {}, calendarSheet: () => {}, workoutDetailSheet: () => {},
-  WorkoutRow: () => React.createElement('div'), bwDeltaColor: () => 'inherit',
+  exerciseHistorySheet: mocks.exerciseHistorySheet,
+  WorkoutRow: () => React.createElement('div'), bwDeltaColor: () => 'inherit', weighInsSheet: () => {},
 }))
-vi.mock('../components/LineChart.jsx', () => ({ default: () => React.createElement('div') }))
+vi.mock('../components/LineChart.jsx', () => ({ default: props => {
+  mocks.charts.push(props)
+  return React.createElement('div')
+} }))
 vi.mock('../components/Heatmap.jsx', () => ({ default: () => React.createElement('div') }))
 vi.mock('../components/Icon.jsx', () => ({ default: props => React.createElement('span', props) }))
 vi.mock('../components/BodyMap.jsx', () => ({
@@ -79,12 +91,13 @@ function entry(id, sets) {
 }
 
 function lifecycleWorkouts(now = BASE_NOW) {
-  // The old one-set session lowers the causal reference seen by the six-set session. Position
-  // that newer stimulus 30 seconds before its .5 crossing so the real interval update flips it.
-  const weightedSet = 640 * (30 / 38) ** 1.5
-  const referenceAfterOldSession = 2000 + (weightedSet - 2000) / 3
+  // Six same-load sets on the chest score 6/8 of a full session, amplified by the
+  // acute:chronic gain of a lone recent session ((6+4)/(1.5+4)). Position that
+  // stimulus 30 seconds before its .5 crossing so the real interval update flips it.
+  // (The 30-day-old balance session sits outside the 28-day chronic window.)
+  const loneGain = (6 + 4) / (6 / 4 + 4)
   const fatigueEdge = now - (
-    36 * Math.log2((6 * weightedSet / referenceAfterOldSession) / Math.LN2) * HOUR - 30000
+    fatigueHalfLifeOf('chest') * Math.log2(6 / FATIGUE_SETS_PER_UNIT * loneGain / Math.LN2) - 30000
   )
   const balanceEdge = now - (30 * DAY - 30000)
   const strengthEdge = now - (14 * DAY - 30000)
@@ -97,13 +110,13 @@ function lifecycleWorkouts(now = BASE_NOW) {
   ]
 }
 
-function allFatiguedWorkout(now = BASE_NOW) {
+function allFatiguedWorkout(now = BASE_NOW, wid = 'all-fatigued') {
   const ids = [
     '1018', '1012', '1167', '1013', '3011', '1413', '1399', '1016', '1005',
     '1010', '1003', '1001', '1511', '1494', '1002', '1000', '1396',
   ]
   return workout(
-    'all-fatigued',
+    wid,
     now,
     ids.map(id => entry(id, Array.from({ length: 12 }, () => set(true)))),
   )
@@ -138,7 +151,9 @@ function resetFixture(workouts = lifecycleWorkouts()) {
   mocks.S.bodyweight = []
   mocks.S.workouts = workouts
   mocks.maps.length = 0
+  mocks.charts.length = 0
   mocks.mapMounts = 0
+  mocks.exerciseHistorySheet.mockClear()
   useUI.setState({ sheets: [] })
 }
 
@@ -176,7 +191,7 @@ async function unmountStats() {
 function muscleCard() {
   return [...container.querySelectorAll('.card')].find(card =>
     [...card.querySelectorAll('.seg button')].some(button =>
-      ['Muscle balance', 'Fatigue', 'Strength'].includes(button.textContent.trim())))
+      ['Sets', 'Fatigue', 'Strength'].includes(button.textContent.trim())))
 }
 
 function buttonWithText(scope, text) {
@@ -187,9 +202,14 @@ function viewButton(text) {
   return buttonWithText(muscleCard(), text)
 }
 
-function balanceRangeButton(text) {
-  return buttonWithText(muscleCard().querySelectorAll('.seg')[1], text)
+// The period of the Sets view is a menu button since the stats redesign ("Period: Week"); it opens
+// the shared picker sheet, mounted here by Modals.
+const periodButton = () => [...muscleCard().querySelectorAll('button')].find(b => (b.getAttribute('aria-label') || '').startsWith('Period:'))
+async function pickPeriod(text) {
+  await click(periodButton())
+  await click([...document.querySelector('#modal-root').querySelectorAll('.sect-b button')].find(b => b.textContent.trim() === text))
 }
+const expectPeriod = text => expect(periodButton()?.getAttribute('aria-label')).toBe('Period: ' + text)
 
 async function click(button) {
   expect(button, `expected a button named ${button?.textContent || 'unknown'}`).toBeTruthy()
@@ -219,10 +239,10 @@ afterEach(async () => {
 describe('Stats muscle recovery view runtime', () => {
   it('dispatches real clicks through Balance, Fatigue, and Strength and preserves selection', async () => {
     await mountStats()
-    expectPressed(viewButton('Muscle balance'))
-    expectPressed(balanceRangeButton('Week'))
+    expectPressed(viewButton('Sets'))
+    expectPeriod('Week')
 
-    await click(balanceRangeButton('30d'))
+    await pickPeriod('30d')
     await click(buttonWithText(muscleCard(), 'All'))
     await click(muscleCard().querySelector('[data-muscle="chest"]'))
     expect(buttonWithText(muscleCard(), 'Hard')).toBeTruthy()
@@ -238,8 +258,8 @@ describe('Stats muscle recovery view runtime', () => {
     expect(lastMap().thresholds.at(-1)).toEqual({ at: 1, level: 4 })
     expect(container.textContent).toContain('Strength shows retained muscle strength. Train again to reset it.')
 
-    await click(viewButton('Muscle balance'))
-    expectPressed(balanceRangeButton('30d'))
+    await click(viewButton('Sets'))
+    expectPeriod('30d')
     expect(buttonWithText(muscleCard(), 'Hard')).toBeTruthy()
     expect(lastMap().selected).toBe('chest')
     expect(lastMap().load.chest).toBe(7)
@@ -247,7 +267,7 @@ describe('Stats muscle recovery view runtime', () => {
 
   it('updates the rendered Fatigue map and Balance window on the real 60-second interval', async () => {
     await mountStats()
-    await click(balanceRangeButton('30d'))
+    await pickPeriod('30d')
     await click(viewButton('Fatigue'))
     await click(muscleCard().querySelector('[data-muscle="chest"]'))
 
@@ -266,8 +286,32 @@ describe('Stats muscle recovery view runtime', () => {
 
     await click(viewButton('Strength'))
     expect(lastMap().load.quadriceps).toBeLessThan(1)
-    await click(viewButton('Muscle balance'))
+    await click(viewButton('Sets'))
     expect(lastMap().load.chest).toBe(6)
+  })
+
+  it('shows the selected muscle fatigue as a labelled zone bar with a value marker', async () => {
+    await mountStats()
+    await click(viewButton('Fatigue'))
+    await click(muscleCard().querySelector('[data-muscle="chest"]'))
+    const value = lastMap().load.chest
+    expect(value).toBeGreaterThan(0.5)
+    const pct = Math.round(value * 100)
+    const card = muscleCard()
+    const bar = card.querySelector('.fbar')
+    expect(bar).toBeTruthy()
+    // The bar carries the band, reads the same state the map does, and marks the value.
+    expect(bar.getAttribute('aria-label')).toBe(`Fatigue: ${pct}% · Fatigued`)
+    expect(bar.querySelector('.zone.fatigued')).toBeTruthy()
+    expect(card.querySelector('.knob').getAttribute('style')).toContain(`${pct}%`)
+    // The value rides above the marker; the scale runs 0–100 with each zone named.
+    expect(card.querySelector('.fval').textContent).toBe(`${pct}%`)
+    const ends = [...card.querySelectorAll('.fends span')].map(el => el.textContent)
+    expect(ends).toEqual(['0%', '100%'])
+    const zones = [...card.querySelectorAll('.fzones .z')].map(el => el.textContent)
+    expect(zones).toEqual(['Ready', 'Recovering', 'Fatigued'])
+    expect(card.textContent).toContain('Recovering in')
+    expect(card.textContent).toContain('Ready in')
   })
 
   it('derives a pound-profile bodyweight in kg and passes it into the rendered Fatigue map', async () => {
@@ -281,13 +325,17 @@ describe('Stats muscle recovery view runtime', () => {
     await mountStats()
     await click(viewButton('Fatigue'))
 
-    // 220.462262 lb ~= 100 kg; ten reps score 1000 kg against the initial 2000 kg reference.
-    expect(lastMap().load.abs).toBeCloseTo(1 - Math.exp(-0.5), 6)
+    // One unloaded set is one effective set whatever the profile unit or body mass:
+    // intensity is session-local and relative, so the 220 lb bodyweight only travels
+    // through opts while the score stays 1 - exp(-1/8 x novice gain of 5/4.25).
+    expect(lastMap().load.abs).toBeCloseTo(1 - Math.exp(-5 / 34), 6)
     expect(lastMap().thresholds).toBeTruthy()
   })
 
   it('renders fixed absolute bands through the actual Fatigue and Strength views', async () => {
-    resetFixture([allFatiguedWorkout()])
+    // Two back-to-back full sessions: even 0.4-weighted secondary movers accumulate
+    // 2 x 12 x 0.4 / 8 = 1.2 raw units, clearing the top band everywhere.
+    resetFixture([allFatiguedWorkout(), allFatiguedWorkout(BASE_NOW, 'all-fatigued-2')])
     await mountStats()
     await click(viewButton('Fatigue'))
     const fatigueMap = lastMap()
@@ -304,9 +352,225 @@ describe('Stats muscle recovery view runtime', () => {
     expect(Math.min(...Object.values(strengthMap.load))).toBe(STRENGTH_FLOOR)
     expect(strengthMap.thresholds.at(-1)).toEqual({ at: 1, level: 4 })
   })
+
+  it('keeps zero-weight snapshots out of recovery maps and last-trained recency', async () => {
+    resetFixture([workout('zero-mapped', BASE_NOW, [{
+      id: 'deleted-zero-mapped',
+      muscleSnapshot: { n: 'Zero mapped', muscleWeights: { chest: 1, biceps: 0 } },
+      sets: [set(true)],
+    }])])
+    await mountStats()
+
+    expect(lastMap().load).toEqual({ chest: 1 })
+    await click(viewButton('Fatigue'))
+    expect(lastMap().load.chest).toBeGreaterThan(0)
+    expect(lastMap().load.biceps).toBe(0)
+    expect(levelsOf(lastMap().load, lastMap().thresholds).biceps).toBe(0)
+
+    await click(viewButton('Strength'))
+    expect(lastMap().load.chest).toBe(1)
+    expect(lastMap().load.biceps).toBe(STRENGTH_FLOOR)
+    const bicepsRow = [...muscleCard().querySelectorAll('.sbar-row')]
+      .find(row => row.querySelector('.sbar-n')?.textContent === 'Biceps')
+    expect(bicepsRow.querySelector('.sbar-v').textContent).toContain('not trained')
+  })
+})
+
+describe('Stats estimated effort', () => {
+  const effortHead = () => [...container.querySelectorAll('.card h2')]
+    .find(h => h.textContent.trim().startsWith('Effort'))
+
+  it('badges estimated numbers on unrated import history', async () => {
+    resetFixture([workout('unrated', BASE_NOW, [
+      entry('0025', Array.from({ length: 6 }, () => set(true, { w: 80, r: 8 }))),
+    ])])
+    await mountStats()
+    const head = effortHead()
+    expect(head, 'expected an Effort card for estimable history').toBeTruthy()
+    // Six self-anchored sets estimate RIR 0: a real average with an honest badge.
+    expect(head.textContent).toContain('estimated')
+    expect(container.textContent).toContain('0 rated')
+  })
+
+  // The summary, the weekly curve and the histogram share one reading per set.
+  it('reads each set once for the whole card', async () => {
+    resetFixture([workout('unrated', BASE_NOW, [
+      entry('0025', Array.from({ length: 6 }, () => set(true, { w: 80, r: 8 }))),
+    ])])
+    resolveSetRir.mockClear()
+    await mountStats()
+    expect(effortHead().textContent).toContain('estimated')
+    const sets = resolveSetRir.mock.calls.map(c => c[0])
+    expect(sets.length).toBeGreaterThan(0)
+    expect(new Set(sets).size).toBe(sets.length)
+  })
+
+  it('keeps the logged view badge-free on rated history', async () => {
+    resetFixture([workout('rated', BASE_NOW, [
+      entry('0025', Array.from({ length: 6 }, () => set(true, { w: 80, r: 8, rir: 2 }))),
+    ])])
+    await mountStats()
+    const head = effortHead()
+    expect(head, 'expected an Effort card for rated history').toBeTruthy()
+    expect(head.textContent).not.toContain('estimated')
+  })
+
+  it('estimates the unrated rest when the only ratings are imported failures', async () => {
+    // The v1.4.0 import case: six sets taken to failure across six sessions, every
+    // other set unrated. Averaging rated sets only would read 0 RIR / 100% hard.
+    const day = (ago, w, fw) => workout(`import-${ago}`, BASE_NOW - ago * DAY, [
+      entry('0025', [
+        set(true, { w, r: 8 }), set(true, { w, r: 8 }),
+        set(true, { w: 40, r: 5 }),
+        set(true, { w: fw, r: 9, failure: true }),
+      ]),
+    ])
+    resetFixture([
+      day(80, 60, 62.5), day(65, 60, 62.5), day(50, 62.5, 65),
+      day(35, 62.5, 65), day(15, 65, 67.5), day(5, 65, 67.5),
+    ])
+    await mountStats()
+    const card = effortHead()?.closest('.card')
+    expect(card, 'expected an Effort card for failure-marked imports').toBeTruthy()
+    expect(effortHead().textContent).toContain('estimated')
+    // Six imported failures plus estimates for the eighteen unrated sets.
+    expect(card.textContent).toContain('6 rated · 18 estimated of 24 sets')
+    // The average speaks for the whole training, not just the failures.
+    const avg = card.querySelector('.stat-v').textContent.trim()
+    expect(avg).toMatch(/RIR$/)
+    expect(parseFloat(avg)).toBeGreaterThan(0)
+    expect(card.querySelector('.effort-sub b').textContent).not.toBe('100%')
+    // The failures stay a visible share at the hard end of the stacked bar's key.
+    const zeroBin = [...card.querySelectorAll('.sstack-legend li')]
+      .find(li => li.querySelector('.slegend-l')?.textContent.trim() === 'RIR 0')
+    expect(zeroBin?.querySelector('.slegend-v').textContent).toMatch(/^6 · /)
+
+    // The resolver applies on every window, not just the default 90d.
+    await click(buttonWithText(card.querySelector('.seg'), '30d'))
+    expect(card.textContent).toContain('2 rated · 6 estimated of 8 sets')
+  })
+})
+
+describe('Stats strength exercise rows', () => {
+  // The rows under "Exercises · <muscle>" are presented as buttons (role, tabIndex, pointer
+  // cursor) but for a year called a handler that never existed, so every tap threw
+  // "onExercise is not defined" and opened nothing (QA C13). A tap now opens the exercise's
+  // history sheet — the one place that already draws the Est. 1RM curve the row quotes.
+  it('opens the exercise history sheet when a row is tapped instead of throwing', async () => {
+    resetFixture(exercisePickerWorkouts())
+    await mountStats()
+    const thrown = []
+    dom.addEventListener('error', e => { thrown.push(e.error || e.message); e.preventDefault() })
+
+    await click(viewButton('Strength'))
+    await click(muscleCard().querySelector('[data-muscle="chest"]'))
+    expect(muscleCard().textContent).toContain('Exercises · Chest')
+    const row = [...muscleCard().querySelectorAll('.sbar-row[role="button"]')].find(el => el.textContent.includes('Est. 1RM'))
+    expect(row, 'expected a tappable exercise row for the chest').toBeTruthy()
+    expect(row.textContent).toContain('barbell bench press')
+
+    await click(row)
+    expect(thrown).toEqual([])
+    expect(mocks.exerciseHistorySheet).toHaveBeenCalledTimes(1)
+    expect(mocks.exerciseHistorySheet).toHaveBeenCalledWith('0025')
+
+    // The keyboard path of tappable() must land in the same place.
+    await act(async () => { row.dispatchEvent(new dom.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+    expect(thrown).toEqual([])
+    expect(mocks.exerciseHistorySheet).toHaveBeenCalledTimes(2)
+  })
+
+  // The retained-strength bar used a 'to right' gradient, which fills from the left in Arabic too.
+  // A width fills from the inline start, the way the detrained rows' bars already did.
+  it('fills the retained-strength bar by width, so it follows the text direction', async () => {
+    resetFixture([workout('bench-old', BASE_NOW - 20 * DAY, [entry('0025', [set(true, { w: 80 })])])])
+    await mountStats()
+    await click(viewButton('Strength'))
+    await click(muscleCard().querySelector('[data-muscle="chest"]'))
+    const row = [...muscleCard().querySelectorAll('.sbar-row[role="button"]')].find(el => el.textContent.includes('Est. 1RM'))
+    expect(row).toBeTruthy()
+    const pct = row.querySelector('.sbar-v').textContent.match(/(\d+)%/)[1]
+    expect(Number(pct)).toBeLessThan(100)
+    const fill = row.querySelector('.sbar-f')
+    expect(fill.style.width).toBe(pct + '%')
+    expect(fill.getAttribute('style')).not.toMatch(/to right|gradient/)
+  })
 })
 
 describe('Stats exercise progress picker', () => {
+  it('keeps a legacy reps record whose load is stored only in topW', async () => {
+    resetFixture([workout('legacy-topw', BASE_NOW, [
+      { id: '0025', target: { mode: 'reps' }, topW: 70, sets: [] },
+    ])])
+    await mountStats()
+
+    const card = [...container.querySelectorAll('.card')].find(el => el.querySelector('h2')?.textContent.trim() === 'Exercise progress')
+    expect(card.textContent).toContain('70 kg')
+    const progressChart = mocks.charts.find(chart => chart.points?.some(point => point.y === 70))
+    expect(progressChart?.points).toHaveLength(1)
+    expect(progressChart.points[0].y).toBe(70)
+  })
+
+  it('keeps the strongest topW across repeated legacy records', async () => {
+    resetFixture([workout('legacy-topw-duplicates', BASE_NOW, [
+      { id: '0025', target: { mode: 'reps' }, topW: 70, sets: [] },
+      { id: '0025', target: { mode: 'reps' }, topW: 60, sets: [] },
+    ])])
+    await mountStats()
+
+    const card = [...container.querySelectorAll('.card')].find(el => el.querySelector('h2')?.textContent.trim() === 'Exercise progress')
+    expect(card.textContent).toContain('70 kg')
+    const progressChart = mocks.charts.find(chart => chart.points?.some(point => point.y === 70))
+    expect(progressChart?.points).toHaveLength(1)
+    expect(progressChart.points[0].y).toBe(70)
+  })
+
+  it('keeps a legacy topW when a modern occurrence shares the workout', async () => {
+    resetFixture([workout('modern-and-legacy', BASE_NOW, [
+      entry('0025', [set(true, { w: 50, r: 5 })]),
+      { id: '0025', target: { mode: 'reps' }, topW: 70, sets: [] },
+    ])])
+    await mountStats()
+
+    const card = [...container.querySelectorAll('.card')].find(el => el.querySelector('h2')?.textContent.trim() === 'Exercise progress')
+    expect(card.textContent).toContain('70 kg')
+    const progressChart = mocks.charts.find(chart => chart.points?.some(point => point.y === 70))
+    expect(progressChart?.points).toHaveLength(1)
+    expect(progressChart.points[0].y).toBe(70)
+  })
+
+  it('aggregates duplicate exercise occurrences into one progress point', async () => {
+    resetFixture([workout('duplicate', BASE_NOW, [
+      entry('0025', [set(true, { w: 60, r: 5 })]),
+      entry('0025', [set(true, { w: 80, r: 5 })]),
+    ])])
+    await mountStats()
+
+    const card = [...container.querySelectorAll('.card')].find(el => el.querySelector('h2')?.textContent.trim() === 'Exercise progress')
+    expect(card.textContent).toContain('80 kg')
+    const progressChart = mocks.charts.find(chart => chart.points?.some(point => point.y === 80))
+    expect(progressChart?.points).toHaveLength(1)
+    expect(progressChart.points[0].y).toBe(80)
+    // the table lists the day once, with its top set (stats redesign)
+    const days = card.querySelectorAll('[data-ex-days] .ex-day')
+    expect(days).toHaveLength(1)
+    expect(days[0].querySelector('.ex-day-s').textContent).toBe('80×5')
+  })
+
+  it('aggregates repeated assisted occurrences by the lightest load', async () => {
+    resetFixture([workout('assisted-duplicate', BASE_NOW, [
+      entry('0017', [set(true, { w: 30, r: 8 })]),
+      entry('0017', [set(true, { w: 20, r: 8 })]),
+    ])])
+    await mountStats()
+
+    const card = [...container.querySelectorAll('.card')].find(el => el.querySelector('h2')?.textContent.trim() === 'Exercise progress')
+    expect(card.textContent).toContain('20 kg')
+    const progressChart = mocks.charts.find(chart => chart.points?.some(point => point.y === 20))
+    expect(progressChart?.points).toHaveLength(1)
+    expect(progressChart.points[0].y).toBe(20)
+  })
+
   it('filters with the shared exercise matcher and still selects from the mounted sheet', async () => {
     resetFixture(exercisePickerWorkouts())
     await mountStats()
@@ -369,13 +633,15 @@ describe('Stats exercise progress picker', () => {
     await click(modal.querySelector('button[aria-label="Clear"]'))
     await setSearch('squat full bárbell')
 
-    expect(modal.textContent).toContain('barbell full squat')
-    expect(modal.textContent).not.toContain('barbell bench press')
+    // A catalogue name is title-cased like it is in every list (exerciseNameText); the legacy
+    // snapshot above keeps the name as it was typed.
+    expect(modal.textContent).toContain('Barbell Full Squat')
+    expect(modal.textContent).not.toContain('Barbell Bench Press')
 
-    const matching = [...modal.querySelectorAll('button')].find(button => button.textContent.includes('barbell full squat'))
+    const matching = [...modal.querySelectorAll('button')].find(button => button.textContent.includes('Barbell Full Squat'))
     await click(matching)
 
     expect(useUI.getState().sheets).toHaveLength(0)
-    expect(card.querySelector('.lrow-v').textContent).toContain('barbell full squat')
+    expect(card.querySelector('.lrow-v').textContent).toContain('Barbell Full Squat')
   })
 })

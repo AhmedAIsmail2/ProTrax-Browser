@@ -1,22 +1,19 @@
-import { EXDB } from './exercises-data.js'
-import { USER_EXERCISE_MUSCLE_OVERRIDES, exerciseMuscleMetadataFor } from './exercise-muscle-batch-1.js'
+import { EXDB, EXALIAS } from './exercises-data.js'
+import MUSCLE_MAP from './exercise-muscle-map.json' with { type: 'json' }
+import V13_IDS from './catalogue-v13-ids.json' with { type: 'json' }
 import { t, getVersion, exerciseNameSearchText } from './i18n-core.js'
+import { exerciseAliases, aliasSnapshot } from './exercise-aliases.js'
 
 export { EXDB }
 
-// The generated dataset remains the compatibility/raw export. The runtime catalogue applies
-// owner-approved muscle metadata as a narrow overlay, so imports and historical tests that rely
-// on the upstream shape keep working while EXIDX and pickers see the corrected model.
+// EXDB carries each exercise as the catalogue describes it in words (target, secondary muscles).
+// Where someone has drawn the muscles more precisely (catalogue "muscleMap": the compound lifts,
+// machines and Olympic lifts, ExRx-informed and owner-approved), that layer is applied here, so
+// the pickers and every muscle map see the corrected model while EXDB stays the plain list.
 const catalogueExercise = ex => {
-  const metadata = exerciseMuscleMetadataFor(ex?.id)
-  if (!Object.keys(metadata).length) return ex
+  const metadata = MUSCLE_MAP[ex?.id]
+  if (!metadata) return ex
   const out = { ...ex, ...metadata }
-  const user = USER_EXERCISE_MUSCLE_OVERRIDES[ex?.id] || {}
-  // A future dataset row may carry explicit arrays of its own; preserve those over generated
-  // defaults unless the owner has deliberately supplied a correction for the same field.
-  for (const key of ['primaries', 'secondaries']) {
-    if (Object.prototype.hasOwnProperty.call(ex, key) && !Object.prototype.hasOwnProperty.call(user, key)) out[key] = ex[key]
-  }
   if (Array.isArray(out.primaries)) out.primaries = [...out.primaries]
   if (Array.isArray(out.secondaries)) out.secondaries = [...out.secondaries]
   return out
@@ -32,6 +29,8 @@ const SECONDARY_ADDITIONS = {
   '0293': ['rear deltoids'], // dumbbell bent over row
   '0499': ['rear deltoids'], // inverted row
   '0861': ['rear deltoids'], // cable seated row
+  '4133': ['lower back'], // kettlebell suitcase deadlift (#693)
+  '10189': ['lower back'], // weighted plate deadlift rear lunge with overhead press (#693)
 }
 
 // Secondary muscles for an exercise, with the small conservative additions applied as an
@@ -45,6 +44,16 @@ export const smOf = ex => {
 
 export const EXIDX = {}
 CATALOGUE.forEach(e => { EXIDX[e.id] = e })
+// The id of a drawing that is no exercise of its own (the female figure of a male exercise) looks
+// up the exercise it draws. Never stored by the app, but a plan file or an import may carry one.
+// Not enumerable, so anything that walks the index still sees every exercise once.
+for (const [id, to] of Object.entries(EXALIAS)) {
+  if (EXIDX[to]) Object.defineProperty(EXIDX, id, { value: EXIDX[to], enumerable: false, configurable: true })
+}
+// The exercise a drawing's id stands for; any other id as it is. For ids on their way in (a plan
+// file, an import, the Coach's output), so the app goes on storing only exercise ids. An id
+// already in state is left alone: rewriting it would move history behind the user's back.
+export const canonicalExId = id => (typeof id === 'string' && Object.hasOwn(EXALIAS, id) && EXIDX[EXALIAS[id]] ? EXALIAS[id] : id)
 export const BODYPARTS = [...new Set(CATALOGUE.map(e => e.bp))].sort()
 
 // Equipment options present in a given list of exercises, most common first (issue #6).
@@ -56,20 +65,72 @@ export function equipmentOf(list) {
   return Object.keys(c).sort((a, b) => c[b] - c[a] || (a < b ? -1 : 1))
 }
 
+// Kinds of exercise (catalogue "category") present in a list, in a fixed order that reads from
+// lifting to everything around it. Custom exercises carry none and only show under "Any type".
+export const CATEGORIES = ['strength', 'calisthenics', 'olympic', 'plyometrics', 'isometric', 'cardio', 'stretching', 'mobility', 'yoga', 'pilates', 'combat', 'rehab']
+export function categoriesOf(list) {
+  const have = new Set(list.map(e => e.cat).filter(Boolean))
+  return CATEGORIES.filter(c => have.has(c))
+}
+// The Type chip row's filter, shared by the Library and the exercise picker (issue #521): the
+// options left in `list`, the choice still in effect, and the list narrowed to it. A choice the
+// search or body part has narrowed away is ignored for now, never a dead end.
+export function byCategory(list, cat) {
+  const opts = categoriesOf(list)
+  const on = opts.includes(cat) ? cat : ''
+  return { opts, on, list: on ? list.filter(e => e.cat === on) : list }
+}
+
 // Custom (user-created) exercises live in synced state S.customEx (issue #11) and are
 // merged into the id index here so every EXIDX[id] lookup keeps working unchanged.
-let customIds = []
+let customIds = new Set()
+const BUILTIN = new Set(CATALOGUE)
 export function registerCustom(list) {
   customIds.forEach(id => {
     delete EXIDX[id]
     const builtIn = CATALOGUE.find(ex => ex.id === id)
     if (builtIn) EXIDX[id] = builtIn
   })
-  customIds = (list || []).map(e => e.id)
-  ;(list || []).forEach(e => { EXIDX[e.id] = e })
+  const xs = (Array.isArray(list) ? list : []).filter(e => e && e.id != null)
+  customIds = new Set(xs.map(e => e.id))
+  xs.forEach(e => { EXIDX[e.id] = e })
+}
+
+// A built-in catalogue entry itself (never a copy, a snapshot or a custom one). Those objects never
+// change while the app runs, so what is derived from them alone can be remembered (muscles.js).
+export const isBuiltinEx = ex => BUILTIN.has(ex)
+
+// Whether an exercise is one of the user's own (#378, #358). Where it lives decides, not the
+// `custom` flag alone: a plan import before 1.3.8 (a shared plan file, a plan from the AI coach)
+// stored its exercises without the flag, and those were left with no Edit, no Delete and a
+// broken thumbnail. A built-in catalogue entry is never custom, even if a custom one shadows its id.
+export const isCustomEx = ex => !!ex && typeof ex === 'object' && !BUILTIN.has(ex) &&
+  (ex.custom === true || customIds.has(ex.id))
+
+// The stored list with the flag put back on every entry that lost it — the same array when
+// nothing is missing, so a copy that is already right is never rewritten. The entry keeps its own
+// `_ts`: the heal is no edit, and a newer stamp would let it win a merge over a real rename made
+// on another device that has not healed yet.
+export function healCustomEx(list) {
+  if (!Array.isArray(list)) return list
+  let changed = false
+  const out = list.map(c => {
+    if (!c || typeof c !== 'object' || c.custom === true) return c
+    changed = true
+    return { ...c, custom: true, ...(c.eq == null ? { eq: '' } : {}) }
+  })
+  return changed ? out : list
 }
 // Full searchable catalogue — customs first so your own exercises are easy to find.
-export const allExercises = st => [...(st.customEx || []), ...CATALOGUE]
+// Every exercise you can pick: yours, then the catalogue's, less any merged into another (#656,
+// lib/exercise-merge.js): a catalogue exercise cannot be removed, so a merge hides it instead.
+export const allExercises = st => {
+  const all = [...(st?.customEx || []), ...CATALOGUE]
+  const m = st?.exMerged
+  if (!m || typeof m !== 'object') return all
+  const away = new Set(Object.keys(m).filter(k => m[k] && m[k].into))
+  return away.size ? all.filter(e => !away.has(e.id)) : all
+}
 
 function searchableText(value) {
   if (Array.isArray(value)) return value.map(searchableText).join(' ')
@@ -91,13 +152,13 @@ function isSubsequence(needle, hay) {
 // field prefix, then word-boundary starts, then substrings (closer to the start scores
 // better), and finally typo-tolerant ordered subsequences. Fields are weighted - the name
 // dominates, target/equipment matter, muscles and description are supporting evidence.
-// 0 means no match, so matchesExerciseSearch stays a boolean filter while the picker can
-// rank results by score.
+// 0 means no match, so a filter can test `> 0` while the picker ranks results by score.
 export function searchScore(exercise, query) {
   const needle = searchableText(query).toLowerCase().trim()
   if (!needle) return 1
-  const source = exercise && typeof exercise === 'object' ? exercise : {}
-  const fields = [['n', 100], ['tg', 40], ['eq', 40], ['sm', 30], ['muscleGroups', 30], ['primaries', 30], ['secondaries', 30], ['desc', 10], ['cues', 10]]
+  const ex = exercise && typeof exercise === 'object' ? exercise : {}
+  const source = { ...ex, aliases: exerciseAliases(ex) }
+  const fields = [['n', 100], ['aliases', 100], ['tg', 40], ['eq', 40], ['sm', 30], ['muscleGroups', 30], ['primaries', 30], ['secondaries', 30], ['desc', 10], ['cues', 10]]
   // Token-level matching: every query word must match somewhere (any order), so
   // "press bench" finds "Bench Press". The score sums each token's best hit.
   const tokens = needle.split(/[^a-z0-9]+/).filter(Boolean)
@@ -121,42 +182,56 @@ export function searchScore(exercise, query) {
   return total
 }
 
-export function matchesExerciseSearch(exercise, query) {
-  return searchScore(exercise, query) > 0
-}
-
-// High-availability CDN mirrors for exercise media (GIFs and JPGs).
-// Primary CDN is jsDelivr with immutable commit hash; fallback is raw GitHub mirror.
-export const PRIMARY_CDN_IMG = 'https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd/images/'
-export const PRIMARY_CDN_GIF = 'https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd/videos/'
-
-export const FALLBACK_CDN_IMG = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/7455efae41b330c265e7cd4b78dfa848e7ce5ebd/images/'
-export const FALLBACK_CDN_GIF = 'https://raw.githubusercontent.com/hasaneyldrm/exercises-dataset/7455efae41b330c265e7cd4b78dfa848e7ce5ebd/videos/'
-
-// Media sits on high-availability CDNs by default so mobile builds and web builds
-// never have broken, motionless, or missing animation media. Self-hosted deployments
-// can override via VITE_IMG_BASE and VITE_GIF_BASE.
+// Media normally sits next to the app (img/ and gif/, mounted into the web container).
+// A build can point them somewhere else — the demo build pulls them off a CDN instead of
+// shipping ~140 MB of images into the deployment. `import.meta.env` is undefined in plain
+// Node; the guard keeps this module loadable without Vite.
 const ENV = import.meta.env || {}
-const IMG_BASE = ENV.VITE_IMG_BASE || PRIMARY_CDN_IMG
-const GIF_BASE = ENV.VITE_GIF_BASE || PRIMARY_CDN_GIF
-export const imgSrc = ex => ex?.img ? (IMG_BASE + ex.img) : ''
-export const gifSrc = ex => ex?.gif ? (GIF_BASE + ex.gif) : ''
+// Under their own folder since v1.4.0: a docker-compose.yml from before then still mounts the old
+// dataset's media over img/ and gif/, and would hide the catalogue's files if they lived there.
+const IMG_BASE = ENV.VITE_IMG_BASE || 'exercise-media/still/'
+const GIF_BASE = ENV.VITE_GIF_BASE || 'exercise-media/clip/'
+// The animations are MP4 loops, except in the Android release: there they are animated WebP
+// (VITE_CLIP_EXT=webp, staged from APP_MEDIA_DIR), shown as a plain image. The WebView's video
+// player stalled at every loop of these 3-second clips on real phones; an image decodes like the
+// GIFs the app had before and loops by itself.
+const CLIP_EXT = ENV.VITE_CLIP_EXT === 'webp' ? '.webp' : '.mp4'
+// About 940 exercises are drawn twice, on a male and on a female figure: `fv` names the female
+// drawing of a male exercise, `mv` the male drawing of a female one. Which figure shows is a
+// setting (figureOf); the exercise, its id and everything logged against it stay the same either
+// way, so switching back and forth is only ever a different picture. An exercise drawn once shows
+// that drawing whatever the setting.
+export const figureOf = S => (S?.exFigure === 'female' || S?.exFigure === 'male')
+  ? S.exFigure
+  : (S?.body === 'female' ? 'female' : 'male')
+const drawing = (ex, figure) => (figure === 'female' ? ex.fv : figure === 'male' ? ex.mv : null) || null
+export const imgSrc = (ex, figure) => IMG_BASE + (drawing(ex, figure) ? drawing(ex, figure) + '.webp' : ex.img)
+const clipFile = f => (CLIP_EXT !== '.mp4' && f.endsWith('.mp4') ? f.slice(0, -4) + CLIP_EXT : f)
+export const gifSrc = (ex, figure) => GIF_BASE + clipFile(drawing(ex, figure) ? drawing(ex, figure) + '.mp4' : ex.gif)
+// The catalogue's animations are short MP4 loops; a fork's or an older build's may still be GIFs.
+export const isVideoSrc = src => /\.(mp4|webm)(\?|$)/i.test(src || '')
 
-export function mediaUrlsFor(ex, type = 'gif') {
-  if (!ex) return []
-  const file = type === 'gif' ? ex.gif : ex.img
-  if (!file) return []
-  const configured = type === 'gif' ? ENV.VITE_GIF_BASE : ENV.VITE_IMG_BASE
-  const primary = type === 'gif' ? PRIMARY_CDN_GIF : PRIMARY_CDN_IMG
-  const fallback = type === 'gif' ? FALLBACK_CDN_GIF : FALLBACK_CDN_IMG
-  const urls = []
-  if (configured) urls.push(configured + file)
-  urls.push(primary + file, fallback + file)
-  return [...new Set(urls)]
-}
+// An exercise from either its id or itself: most helpers below take both.
+export const exerciseOf = idOrEx => (typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)
 
 // Cardio exercises log time + speed instead of weight × reps.
-export const isCardio = idOrEx => (typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.bp === 'cardio'
+export const isCardio = idOrEx => exerciseOf(idOrEx)?.bp === 'cardio'
+
+// Static holds (planks, wall sits, levers, hangs): the catalogue marks the exercises that are only
+// ever held ("hold": true), so a freshly added one starts as a timed hold rather than as reps.
+export const isHold = idOrEx => !!(typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.hd
+
+// Exercises done one arm or leg at a time, by their catalogue name: "single leg", "one arm",
+// "single-arm", "unilateral". Stretches and rollers are mobility, not sets, and a single-leg
+// push-up or plank is a two-arm exercise with a leg lifted. Like `isBodyweightEq`, this only seeds
+// a fresh config (`side: true`); the flag lives on the config, so either way can be switched.
+const ONE_LIMB = /\b(single|one)[\s-]+(arm|leg|hand)\b|\bunilateral\b/i
+const NOT_ONE_LIMB = /stretch|\broll(er|ball)?\b|two to one|single leg (push|plank)|leg push up/i
+export const isOneLimb = idOrEx => {
+  const ex = typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx
+  if (!ex || ex.custom || ex.bp === 'cardio') return false
+  return ONE_LIMB.test(ex.n || '') && !NOT_ONE_LIMB.test(ex.n || '')
+}
 
 // Exercises the dataset already knows carry no external load (issue #32) — a quarter of the
 // catalogue. This seeds the `bw` flag on a fresh config so a push-up never asks for a weight
@@ -167,7 +242,67 @@ export const isCardio = idOrEx => (typeof idOrEx === 'string' ? EXIDX[idOrEx] : 
 // per-exercise Bodyweight switch still overrides it either way (issue #39).
 const BODYWEIGHT_EQ = new Set(['body weight', 'band', 'resistance band'])
 export const isBodyweightEq = idOrEx =>
-  BODYWEIGHT_EQ.has((typeof idOrEx === 'string' ? EXIDX[idOrEx] : idOrEx)?.eq)
+  BODYWEIGHT_EQ.has(exerciseOf(idOrEx)?.eq)
+
+// Equipment that is a load in its own right: a bar, a bell, a stack, a sled, a weight. A set on
+// one of these logged at 0 kg is a number nobody typed in. The rest of the catalogue that is not
+// bodyweight — an ab wheel, a stability ball, a bosu, a rope, a roller, the "assisted" straps —
+// often has no load to enter at all, so 0 there is the honest number and progression moves the
+// reps instead (lib/progression.js).
+const LOADED_EQ = new Set(['barbell', 'ez barbell', 'olympic barbell', 'trap bar', 'dumbbell', 'kettlebell', 'clubbell', 'macebell', 'cable', 'leverage machine', 'smith machine', 'sled machine', 'weighted'])
+export const isLoadedEq = idOrEx =>
+  LOADED_EQ.has(exerciseOf(idOrEx)?.eq)
+
+/* Assistance machines run the other way round: the stack carries part of your body weight, so
+ * a smaller number is the harder set and the record (issue #232). Getting the set wrong is
+ * worse than not having the feature — inverting a normal lift would hide real progress — so the
+ * rule is deliberately narrow: the machine that takes load off you is the leverage machine whose
+ * name says "assisted". That is eight exercises in the catalogue (assisted pull-up, chin-up,
+ * chest dip, triceps dip and their variants) and nothing else.
+ *
+ * The name alone is not enough. Twenty-nine catalogue entries say "assisted": partner-assisted
+ * stretches, a medicine-ball twist, band and bodyweight leg curls. On those the weight is
+ * ordinary load — heavier is harder — and inverting them would be the same bug pointed the
+ * other way. Equipment is what separates the two.
+ *
+ * `assisted: true` (or `false`) on a custom exercise or on a routine's config overrides the
+ * rule in either direction, which is how anything the catalogue does not know gets marked.
+ */
+const ASSISTED_EQ = 'leverage machine'
+const assistedName = n => /\bassist(ed)?\b/i.test(String(n || ''))
+
+// The catalogue entry itself carries an `id`, so this never recurses through it — one lookup,
+// then the shape is read directly.
+const assistedShape = ex => (typeof ex?.assisted === 'boolean' ? ex.assisted : ex?.eq === ASSISTED_EQ && assistedName(ex?.n))
+
+// Body parts where a 5 kg jump is normal rather than brutal.
+const HEAVY_BP = ['upper legs', 'lower legs', 'back', 'hips', 'glutes']
+
+// Default load step. Lower-body lifts take the bigger jump — that is the "lift-specific
+// increment" a linear program lives on; an exercise can override it with cfg.inc.
+// (progression.js re-exports this; it lives here so history.js can reach it without a cycle.)
+export function defaultIncrement(exId, unit) {
+  const ex = EXIDX[exId]
+  const heavy = ex && HEAVY_BP.includes(ex.bp)
+  if (unit === 'lb') return heavy ? 10 : 5
+  return heavy ? 5 : 2.5
+}
+
+export function isAssisted(idOrEx) {
+  if (!idOrEx) return false
+  if (typeof idOrEx === 'string') return !!assistedShape(EXIDX[idOrEx])
+  if (typeof idOrEx.assisted === 'boolean') return idOrEx.assisted
+  if (typeof idOrEx.target?.assisted === 'boolean') return idOrEx.target.assisted
+  const known = idOrEx.id ? EXIDX[idOrEx.id] : null
+  return !!assistedShape(known || idOrEx)
+}
+
+/** The better of two loads for this exercise: less assistance, or more weight. */
+export const betterWeight = (idOrEx, a, b) => (isAssisted(idOrEx) ? Math.min(a, b) : Math.max(a, b))
+
+/** Is `w` a better load than `prev`? `prev` of 0 means nothing logged yet. */
+export const beatsWeight = (idOrEx, w, prev) =>
+  w > 0 && (prev <= 0 || (isAssisted(idOrEx) ? w < prev : w > prev))
 
 // An id that resolves to nothing — a plan file built against a different exercise dataset,
 // a custom exercise deleted on another device before the sync arrived — still has to
@@ -192,299 +327,339 @@ export const normalizeStr = s => (s || '')
 // is the i18n version (bumped by every setLang), so switching language rebuilds the translated
 // terms. Custom exercises are re-cached automatically — the store clones state on update, so an
 // edited exercise arrives as a new object the WeakMap has never seen.
-function extraAliasesFor(e) {
-  const aliases = []
-  const n = (e?.n || '').toLowerCase()
-  const eq = (e?.eq || '').toLowerCase()
-  const bp = (e?.bp || '').toLowerCase()
-  const tg = (e?.tg || '').toLowerCase()
-
-  // Machine & equipment aliases
-  if (eq.includes('machine') || eq === 'assisted' || eq === 'sled machine' || eq === 'leverage machine') {
-    aliases.push('machine', 'machines', 'gym machine', 'lever', 'selectorized', 'pin loaded')
-  }
-  if (eq.includes('cable')) {
-    aliases.push('cable', 'cables', 'pulley', 'machine')
-  }
-  if (eq.includes('dumbbell')) {
-    aliases.push('db', 'dumbbell', 'dumbbells')
-  }
-  if (eq.includes('barbell') || eq.includes('trap bar')) {
-    aliases.push('bb', 'barbell', 'bar', 'barbells')
-  }
-  if (eq.includes('smith')) {
-    aliases.push('smith', 'smith machine', 'machine')
-  }
-  if (eq.includes('body weight')) {
-    aliases.push('bw', 'bodyweight', 'calisthenics')
-  }
-
-  // Common movement & gym machine names
-  if (n.includes('seated fly') || n.includes('chest fly') || n.includes('butterfly') || n.includes('pec fly')) {
-    aliases.push('pec deck', 'pec dec', 'pec fly', 'butterfly', 'chest fly machine', 'peck deck', 'chest machine')
-  }
-  if (n.includes('chest press') || n.includes('lever chest press')) {
-    aliases.push('chest press', 'machine chest press', 'chest press machine', 'chest machine')
-  }
-  if (n.includes('incline chest press') || n.includes('lever incline chest')) {
-    aliases.push('incline chest press', 'incline press machine', 'incline machine', 'chest machine')
-  }
-  if (n.includes('shoulder press') || n.includes('lever shoulder press') || (eq.includes('machine') && n.includes('overhead'))) {
-    aliases.push('shoulder press machine', 'machine shoulder press', 'overhead press machine', 'shoulder machine')
-  }
-  if (n.includes('romanian deadlift') || n.includes('stiff leg')) {
-    aliases.push('rdl')
-  }
-  if (n.includes('overhead press') || n.includes('shoulder press') || n.includes('military press')) {
-    aliases.push('ohp')
-  }
-  if (n.includes('lateral pulldown') || n.includes('lat pulldown') || n.includes('pulldown')) {
-    aliases.push('lat pulldown', 'lat pull', 'pulldowns', 'lat machine', 'back machine')
-  }
-  if (n.includes('biceps curl') || n.includes('bicep curl') || n.includes('arm curl')) {
-    aliases.push('bicep', 'biceps', 'bicep curl', 'biceps curl', 'curls')
-    if (eq.includes('machine') || eq.includes('lever') || eq.includes('cable')) aliases.push('bicep machine', 'arm machine')
-  }
-  if (n.includes('triceps pushdown') || n.includes('pushdown') || n.includes('tricep extension')) {
-    aliases.push('tricep', 'triceps', 'tricep pushdown', 'pushdown', 'rope pushdown')
-    if (eq.includes('machine') || eq.includes('lever') || eq.includes('cable')) aliases.push('tricep machine', 'arm machine')
-  }
-  if (n.includes('leg press') || n.includes('sled 45')) {
-    aliases.push('leg press', 'leg press machine', '45 leg press', 'horizontal leg press', 'leg machine')
-  }
-  if (n.includes('leg extension')) {
-    aliases.push('leg extension', 'quad extension', 'leg extension machine', 'leg machine')
-  }
-  if (n.includes('leg curl') || n.includes('hamstring curl')) {
-    aliases.push('leg curl', 'hamstring curl', 'lying leg curl', 'seated leg curl', 'leg machine')
-  }
-  if (n.includes('lateral raise') || n.includes('side lateral')) {
-    aliases.push('lateral raise', 'side raise', 'side lateral raise', 'lateral raises')
-    if (eq.includes('machine') || eq.includes('lever')) aliases.push('lateral raise machine', 'shoulder machine')
-  }
-  if (n.includes('calf raise') || n.includes('calf press')) {
-    aliases.push('calf raise', 'calves', 'calf machine', 'standing calf raise', 'seated calf raise', 'leg machine')
-  }
-  if (n.includes('bench press')) {
-    aliases.push('bench press', 'chest press', 'flat bench')
-  }
-  if (n.includes('incline bench') || n.includes('incline chest')) {
-    aliases.push('incline press', 'incline bench', 'upper chest')
-  }
-  if (n.includes('preacher curl')) {
-    aliases.push('preacher curl', 'bicep preacher', 'preacher curl machine', 'bicep machine')
-  }
-  if (n.includes('hack squat')) {
-    aliases.push('hack squat', 'hack squat machine', 'leg machine')
-  }
-  if (n.includes('seated row') || n.includes('cable row') || n.includes('cable seated row') || n.includes('bent over row')) {
-    aliases.push('cable row', 'seated row', 'back row', 'rows', 'back machine')
-  }
-  if (n.includes('face pull')) {
-    aliases.push('face pull', 'rear delt face pull')
-  }
-  if (n.includes('hip thrust') || n.includes('glute bridge')) {
-    aliases.push('hip thrust', 'glute bridge', 'glute drive', 'hip thrust machine', 'leg machine')
-  }
-  if (n.includes('t-bar row') || n.includes('t bar')) {
-    aliases.push('t bar row', 't-bar row', 'chest supported row')
-  }
-  if (n.includes('assisted') && (n.includes('pull') || n.includes('chin'))) {
-    aliases.push('assisted pull up', 'assisted chin up', 'assisted pullup', 'pull up machine', 'lat machine', 'back machine')
-  }
-  if (n.includes('assisted') && n.includes('dip')) {
-    aliases.push('assisted dip', 'assisted dips', 'dip machine', 'chest machine')
-  }
-  if (n.includes('cable crossover') || (n.includes('cable') && n.includes('fly'))) {
-    aliases.push('cable fly', 'cable crossover', 'high to low fly', 'low to high fly', 'chest machine')
-  }
-  if (n.includes('crunch') || n.includes('ab coaster')) {
-    aliases.push('cable crunch', 'ab machine', 'ab crunch')
-  }
-  if (n.includes('shrug')) {
-    aliases.push('shrugs', 'trap shrug', 'traps')
-  }
-
-  // Muscle aliases
-  if (bp === 'chest' || tg === 'pectorals') {
-    aliases.push('pec', 'pecs', 'chest')
-  }
-  if (bp === 'back' || tg === 'lats') {
-    aliases.push('lat', 'lats', 'back', 'wings')
-  }
-  if (bp === 'upper legs' || tg === 'quads') {
-    aliases.push('quad', 'quads', 'thighs', 'legs', 'leg')
-  }
-  if (tg === 'hamstrings') {
-    aliases.push('ham', 'hams', 'hamstring', 'hamstrings', 'legs', 'leg')
-  }
-  if (bp === 'lower legs' || tg === 'calves') {
-    aliases.push('calf', 'calves', 'lower leg', 'legs')
-  }
-  if (tg === 'glutes') {
-    aliases.push('glute', 'glutes', 'butt', 'booty', 'hips')
-  }
-  if (bp === 'upper arms' || tg === 'biceps' || tg === 'triceps') {
-    aliases.push('arms', 'arm')
-  }
-  if (bp === 'shoulders' || tg === 'delts') {
-    aliases.push('delt', 'delts', 'shoulder', 'shoulders')
-  }
-  if (bp === 'waist' || tg === 'abs') {
-    aliases.push('ab', 'abs', 'core', 'abdominal', 'abdominals')
-  }
-
-  return aliases
-}
-
-const COMMON_STAPLES = [
-  'barbell bench press', 'dumbbell bench press', 'incline barbell bench press',
-  'incline dumbbell bench press', 'lever chest press', 'lever seated fly',
-  'barbell squat', 'sled 45° leg press', 'lever leg extension', 'lever seated leg curl',
-  'barbell deadlift', 'cable bar lateral pulldown', 'cable seated row',
-  'overhead press', 'dumbbell lateral raise', 'cable triceps pushdown',
-  'dumbbell bicep curl', 'ez barbell curl', 'barbell bent over row',
-  'standing calf raise', 'hanging leg raise', 'smith bench press', 'smith squat'
-]
-
-export function scoreExercise(e, query = '', usage = {}, isFav = false) {
-  let score = 0
-  const name = (e?.n || '').toLowerCase()
-  const q = normalizeStr(query).trim()
-
-  if (isFav) score += 400
-  if (usage[e?.id]) score += Math.min(300, usage[e.id] * 50)
-
-  for (const staple of COMMON_STAPLES) {
-    if (name.includes(staple)) {
-      score += 150
-      break
-    }
-  }
-
-  if (!q) return score
-
-  // Stretches should never beat compound or machine lifting movements unless query asks for stretch
-  if (name.includes('stretch') && !q.includes('stretch')) score -= 300
-
-  const tokens = q.split(/\s+/).filter(Boolean)
-  if (!tokens.length) return score
-
-  if (name === q) score += 1000
-  else if (name.startsWith(q)) score += 600
-  else if (name.includes(q)) score += 400
-
-  const eq = (e?.eq || '').toLowerCase()
-  const bp = (e?.bp || '').toLowerCase()
-  const tg = (e?.tg || '').toLowerCase()
-
-  // Equipment domain boosts
-  if (q.includes('machine') && (eq.includes('machine') || eq === 'assisted' || eq === 'sled machine')) score += 200
-  if (q.includes('cable') && eq.includes('cable')) score += 200
-
-  // Muscle domain boosts
-  if (q.includes('chest') && (bp === 'chest' || tg === 'pectorals' || name.includes('chest'))) score += 180
-  if (q.includes('leg') && (bp === 'upper legs' || bp === 'lower legs' || tg === 'quads' || tg === 'hamstrings' || tg === 'calves' || name.includes('leg'))) score += 180
-  if (q.includes('back') && (bp === 'back' || tg === 'lats' || name.includes('back'))) score += 180
-  if (q.includes('lat') && (tg === 'lats' || name.includes('lat') || name.includes('pulldown'))) score += 180
-  if (q.includes('shoulder') && (bp === 'shoulders' || tg === 'delts' || name.includes('shoulder'))) score += 180
-  if ((q.includes('bicep') || q.includes('biceps')) && (tg === 'biceps' || name.includes('bicep') || name.includes('curl'))) score += 180
-  if ((q.includes('tricep') || q.includes('triceps')) && (tg === 'triceps' || name.includes('tricep') || name.includes('pushdown'))) score += 180
-
-  tokens.forEach(tok => {
-    if (name.includes(tok)) score += 150
-    if (tg.includes(tok)) score += 80
-    if (bp.includes(tok)) score += 60
-    if (eq.includes(tok)) score += 70
-  })
-
-  // Short clean names rank slightly higher than verbose ones
-  score -= Math.min(40, name.length * 0.4)
-
-  return score
-}
-
-const TYPO_MAP = {
-  'dumbell': 'dumbbell',
-  'dumbel': 'dumbbell',
-  'machin': 'machine',
-  'extention': 'extension',
-  'puldown': 'pulldown',
-  'peck': 'pec',
-}
-
+//
+// Each entry keeps the full corpus for substring matching and, separately, the words of the
+// name (English and localized) that the typo tolerance below is allowed to compare against.
 const corpusCache = new WeakMap()
+// Every distinct word of every name the search has seen (a few thousand for the whole catalogue).
+const VOCAB = new Set()
 
 function corpusOf(e) {
   const v = getVersion()
   const hit = corpusCache.get(e)
-  if (hit && hit.v === v) return hit.s
+  if (hit && hit.v === v && hit.aliases === aliasSnapshot()) return hit
   const sm = Array.isArray(e?.sm) ? e.sm : []
-  const aliases = extraAliasesFor(e)
+  const name = normalizeStr(exerciseNameSearchText(e))
   const s = normalizeStr([
-    exerciseNameSearchText(e),
+    name, ...exerciseAliases(e),
     e?.tg || '', t(e?.tg || ''),
     e?.eq || '', t(e?.eq || ''),
     e?.bp || '', t(e?.bp || ''),
     ...sm, ...sm.map(m => t(m)),
-    ...aliases,
     e?.desc || ''
   ].join(' '))
-  corpusCache.set(e, { v, s })
-  return s
+  // The name run together, so "benchpress" or "bench-press" finds "bench press" the way "pullup"
+  // already found the names that spell it that way (QA 1.3.9). Name only: joined across fields,
+  // a body part and an equipment word would start matching as one.
+  // The joined form only counts from the start of a name word, or "thigh" would find "sumo
+  // deadlift high pull" through "deadlifthighpull".
+  const entry = { v, s, name, aliases: aliasSnapshot(), ...joinedOf(name), nameWords: name.split(/[\s\-‐-―()/,]+/).filter(Boolean) }
+  for (const w of entry.nameWords) VOCAB.add(w)
+  corpusCache.set(e, entry)
+  return entry
 }
 
+// How many single-character edits (insert, delete, substitute, swap two neighbours) apart two
+// words are, or `max + 1` as soon as it is clear they are further apart than `max`.
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1
+  let prev2 = null, prev = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]
+    let rowMin = i
+    for (let j = 1; j <= b.length; j++) {
+      let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+      if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1)
+      cur.push(v)
+      if (v < rowMin) rowMin = v
+    }
+    if (rowMin > max) return max + 1
+    prev2 = prev
+    prev = cur
+  }
+  return prev[b.length]
+}
+
+// Typos allowed in a query word against a name word: none below four letters ("row" and "curl"
+// are too common for a neighbour to mean anything), one up to six, two from seven.
+const typosFor = word => (word.length < 4 ? 0 : word.length < 7 ? 1 : 2)
+
+// Allow typos (typosFor) in a query token against one name word, or against its first letters
+// once the token is long enough to be a word in progress ("dumbel" for "dumbbell").
+//
+// Only the exercise's own name words are ever compared this way. Body part, target and
+// equipment words are shared by a whole slice of the catalogue, so one accidental neighbour
+// ("wrist" ~ "waist", "power" ~ "lower arms", "drucken" ~ "rucken") would list hundreds of
+// unrelated exercises ahead of the real hits (QA C26).
+function nearWordUncached(a, b) {
+  const max = typosFor(a)
+  if (!max) return false
+  if (editDistance(a, b, max) <= max) return true
+  return a.length >= 5 && b.length > a.length && editDistance(a, b.slice(0, a.length), max) <= max
+}
+
+// One search compares the same few query words against the same few thousand distinct name
+// words over and over (5,600 exercises share most of their words). Each pair is worked out once
+// per search: without this a three-word query took over half a second on a desktop.
+let nearCache = new Map()
+const resetNearCache = () => { if (nearCache.size) nearCache = new Map() }
+function cached(kind, a, b, fn) {
+  const key = kind + a + '\u0000' + b
+  let v = nearCache.get(key)
+  if (v === undefined) { v = fn(); nearCache.set(key, v) }
+  return v
+}
+const nearWord = (a, b) => cached('n', a, b, () => nearWordUncached(a, b))
+
+// Gym shorthand and spellings people type, each read as the words the catalogue uses. A query
+// token matches when it or any of its expansions does; the expansions are phrases (all words).
+const SYNONYMS = {
+  db: ['dumbbell'], dbs: ['dumbbell'], bb: ['barbell'], kb: ['kettlebell'], kbs: ['kettlebell'],
+  ez: ['ez barbell'], sm: ['smith'], bw: ['body weight'], bodyweight: ['body weight'],
+  ohp: ['overhead press', 'shoulder press', 'military press'], rdl: ['romanian deadlift'],
+  sldl: ['stiff leg deadlift'], dl: ['deadlift'], bp: ['bench press'], skullcrusher: ['lying triceps extension', 'skull crusher'],
+  skullcrushers: ['lying triceps extension', 'skull crusher'], pulldown: ['pull down', 'pulldown'],
+  pullup: ['pull up', 'pull-up'], chinup: ['chin up', 'chin-up'], pushup: ['push up', 'push-up'],
+  pressup: ['push up', 'push-up'], situp: ['sit up', 'sit-up'], flye: ['fly'], flyes: ['fly'], flies: ['fly'],
+  machine: ['lever', 'machine', 'sled'], lever: ['lever', 'machine'], abs: ['crunch', 'abs'],
+  hammy: ['hamstring'], hammies: ['hamstring'], quad: ['quads', 'quadriceps'], tricep: ['triceps'], bicep: ['biceps'],
+  delt: ['delts', 'shoulder'], lat: ['lats', 'latissimus', 'pulldown'], trap: ['traps', 'shrug'],
+  glute: ['glutes', 'gluteus'], calf: ['calf', 'calves'], hip: ['hip'], rope: ['rope'], trx: ['suspension'],
+  ring: ['ring', 'suspension'], rings: ['ring', 'suspension'], kettle: ['kettlebell'], dumbel: ['dumbbell'],
+}
+
+// The forms a token may take: as typed, the shorthand it stands for, and the singular of a plural
+// ("curls" finds "curl", "raises" finds "raise", "presses" finds "press").
+const formsCache = new Map()
+function formsOf(tok) {
+  const hit = formsCache.get(tok)
+  if (hit) return hit
+  const forms = formsOfUncached(tok)
+  if (formsCache.size > 500) formsCache.clear()
+  formsCache.set(tok, forms)
+  return forms
+}
+function formsOfUncached(tok) {
+  const out = [tok]
+  for (const s of SYNONYMS[tok] || []) out.push(s)
+  if (tok.length >= 4 && tok.endsWith('es') && !tok.endsWith('ses')) out.push(tok.slice(0, -2), tok.slice(0, -1))
+  else if (tok.length >= 4 && tok.endsWith('ses')) out.push(tok.slice(0, -2))
+  // Three letters is enough for "ups" ("pull ups" is "pull-up"); "abs" is a word of its own.
+  else if (tok.length >= 3 && tok.endsWith('s') && !tok.endsWith('ss') && tok !== 'abs') out.push(tok.slice(0, -1))
+  return [...new Set(out)]
+}
+
+const queryTokens = query => normalizeStr(query || '').split(/\s+/).filter(Boolean)
+const SEPARATOR = /[\s\-‐-―]/
+const WORD_CHAR = /[\p{L}\p{N}]/u
+const joinWords = str => str.replace(/[\s\-‐-―]+/g, '')
+
+// The name with its spaces and hyphens left out, and where each of its words starts in that.
+function joinedOf(name) {
+  let joined = ''
+  const starts = new Set()
+  for (let i = 0; i < name.length; i++) {
+    if (SEPARATOR.test(name[i])) continue
+    if (i === 0 || !WORD_CHAR.test(name[i - 1])) starts.add(joined.length)
+    joined += name[i]
+  }
+  return { joined, starts }
+}
+
+function joinedHit(entry, tok) {
+  const needle = joinWords(tok)
+  for (let at = entry.joined.indexOf(needle); at !== -1; at = entry.joined.indexOf(needle, at + 1)) {
+    if (entry.starts.has(at)) return true
+  }
+  return false
+}
+
+// A token appears in the corpus as typed, or in the name with its spaces and hyphens left out,
+// starting at a word.
+const literalHit = (entry, tok) => entry.s.includes(tok) || (tok.length >= 4 && joinedHit(entry, tok))
+const hits = (entry, tok) => formsOf(tok).some(form => literalHit(entry, form))
+
+// Every token has to appear in the corpus; a token listed in `fuzzy` may instead be one edit
+// away from a name word.
+const matchTokens = (e, tokens, fuzzy) => {
+  const entry = corpusOf(e)
+  return tokens.every(tok => hits(entry, tok) || (fuzzy.has(tok) && formsOf(tok).some(f => entry.nameWords.some(word => nearWord(f, word)))))
+}
+
+// Single-exercise check, used where the list is filtered one option at a time (the exercise
+// progress picker). Every token may fall back to the typo tolerance; lists go through
+// searchExercises below, which knows whether a token needs it at all.
 export function matchExercise(e, query) {
-  if (!query) return true
-  const tokens = normalizeStr(query).split(/\s+/).filter(Boolean)
+  const tokens = queryTokens(query)
   if (!tokens.length) return true
   if (!e || typeof e !== 'object') return false
-  const corpus = corpusOf(e)
-  const words = corpus.split(/\s+/)
-  return tokens.every(rawTok => {
-    const tok = TYPO_MAP[rawTok] || rawTok
-    if (tok.length <= 3) {
-      return words.some(w => w === tok || w.startsWith(tok))
+  return matchTokens(e, tokens, new Set(tokens))
+}
+
+// Search a list, exact hits first: a token that appears literally in at least one exercise is
+// taken at its word for the whole list, and only a token with no exact hit anywhere ("bnech",
+// "dumbell", "wirst") is allowed the typo tolerance. Otherwise a correctly spelled query such
+// as "squat" or "clean" would also drag in "squad" and "lean", and since the callers keep
+// catalogue order those strays would land ahead of the real matches (QA C26).
+export function searchExercises(list, query) {
+  const tokens = queryTokens(query)
+  if (!tokens.length) return list
+  resetNearCache()
+  const fuzzy = new Set(tokens.filter(tok => !list.some(e => hits(corpusOf(e), tok))))
+  return rankByRelevance(list.filter(e => matchTokens(e, tokens, fuzzy)), tokens)
+}
+
+// Per search, for each form of each query word: the vocabulary words it starts, the ones within
+// the allowed typos, and the ones one typo further (for the similar list). Worked out once over
+// the vocabulary, so scoring an exercise is a handful of set lookups instead of string distance
+// against each of its words: 5,600 exercises took a quarter of a second the other way.
+function queryContext(tokens) {
+  const ctx = new Map()
+  for (const tok of tokens) {
+    for (const form of formsOf(tok)) {
+      if (ctx.has(form) || form.includes(' ')) continue
+      // One typo more than the exact search allows, but only for words of six letters and up:
+      // "pull" is two letters from "curl", and that is a different exercise, not a typo.
+      const extraMax = tok.length >= 6 ? typosFor(tok) + 1 : typosFor(tok)
+      const prefix = new Set(), near = new Set(), extra = new Set()
+      for (const w of VOCAB) {
+        if (w.startsWith(form)) prefix.add(w)
+        if (nearWordUncached(form, w)) near.add(w)
+        else if (tok.length >= 4 && editDistance(form, w, extraMax) <= extraMax) extra.add(w)
+      }
+      ctx.set(form, { prefix, near, extra })
     }
-    return words.some(w => w.startsWith(tok)) || corpus.includes(tok)
+  }
+  return ctx
+}
+
+// How well one query token sits in an exercise: a whole word of the name beats the start of one,
+// which beats anywhere in the name, the name run together, a typo in the name, and last of all
+// another field (target, equipment, body part, muscles). Zero when it is not there at all.
+function tokenScore(entry, tok, ctx) {
+  let best = 0
+  for (const form of formsOf(tok)) {
+    const c = ctx && ctx.get(form)
+    // A singular or a spelling variant counts a little less than what was typed; the meaning of
+    // a short abbreviation ("rdl", "ohp", "db") is exactly what was meant and counts in full.
+    const exact = form === tok || (tok.length <= 4 && SYNONYMS[tok]?.includes(form)) ? 0 : 5
+    const words = form.split(' ')
+    if (words.length > 1) {
+      if (entry.name.includes(form)) best = Math.max(best, 100 - exact)
+      else if (entry.s.includes(form)) best = Math.max(best, 20 - exact)
+      continue
+    }
+    if (entry.nameWords.includes(form)) best = Math.max(best, 100 - exact)
+    else if (c ? entry.nameWords.some(w => c.prefix.has(w)) : entry.nameWords.some(w => w.startsWith(form))) best = Math.max(best, 80 - exact)
+    else if (entry.name.includes(form)) best = Math.max(best, 60 - exact)
+    else if (form.length >= 4 && joinedHit(entry, form)) best = Math.max(best, 55 - exact)
+    else if (c ? entry.nameWords.some(w => c.near.has(w)) : entry.nameWords.some(w => nearWord(form, w))) best = Math.max(best, 40 - exact)
+    else if (entry.s.includes(form)) best = Math.max(best, 20 - exact)
+  }
+  return best
+}
+
+// Among equally good matches, the one people most likely mean: the familiar core of the
+// catalogue (the exercises ProTraX shipped before v1.4.0), the common equipment, and a lift
+// before a stretch. Small on purpose: it orders ties, it never beats a better match.
+const CLASSIC = new Set(V13_IDS)
+const EQ_PRIOR = { barbell: 4, dumbbell: 4, cable: 3, 'leverage machine': 3, 'body weight': 3, 'smith machine': 2, kettlebell: 2, 'ez barbell': 2, 'sled machine': 2 }
+const CAT_PRIOR = { strength: 3, calisthenics: 3, olympic: 2, plyometrics: 1, isometric: 1, stretching: -3, mobility: -3, rehab: -4, yoga: -2, pilates: -2 }
+// The one version every gym has, where the catalogue's name hides it: "leg press" means the 45°
+// sled, not the Smith machine or a one-leg variant (Discord, 2026-10-09).
+const EVERYDAY = { '0739': 6 }
+const priorOf = e => (CLASSIC.has(e.id) ? 3 : 0) + (EQ_PRIOR[e.eq] || 0) + (CAT_PRIOR[e.cat] || 0) + (EVERYDAY[e.id] || 0)
+
+// The lifts most people mean when they search a muscle ("chest", "back", "Beine"): the staples of
+// a commercial gym, so a muscle search opens on the bench press and the pulldown instead of the
+// alphabetically first stretches (Discord, 2026-10-27).
+const STAPLES = new Set([
+  '0025', '0047', '0289', '0314', '0251', '0155', '0308', '0662', '0596', '0576',          // chest
+  '0652', '1326', '0198', '0027', '0861', '0032', '0292', '0293', '0606',                 // back
+  '0043', '3593', '0739', '0585', '0586', '0599', '0085', '0336', '1060', '0605', '1372', // legs, glutes, calves
+  '1162', '0405', '0334', '0178',                                                         // shoulders
+  '0031', '0294', '0313', '2249', '0060', '0061',                                         // arms
+  '0274', '0463', '0472', '0175',                                                         // core
+])
+const STRETCHY = new Set(['stretching', 'mobility', 'rehab', 'yoga', 'pilates'])
+// Body part and target muscle words of an exercise, in English and in the reader's language.
+const bodyWordsOf = e => new Set(normalizeStr([e?.bp || '', t(e?.bp || ''), e?.tg || '', t(e?.tg || '')].join(' ')).split(' ').filter(Boolean))
+
+// A name that is the query itself wins outright: as typed or in the singular 50, with the typos
+// the search allows for its length 40 ("sqat" is the exercise called "squat", not "dumbbell squat").
+function wholeNameScore(plain, typedForms) {
+  if (typedForms.includes(plain)) return 50
+  return typedForms.some(q => { const max = typosFor(q); return max && editDistance(q, plain, max) <= max }) ? 40 : 0
+}
+
+// The matches in order of how well they match, shorter names first among equals (the plain
+// "barbell squat" before its six variations), and the list's own order after that: custom
+// exercises, which callers put first, stay first among equal matches.
+function rankByRelevance(found, tokens) {
+  const ctx = queryContext(tokens)
+  // The query as typed, and with each word in its singular: "pull ups" is the name "pull-up".
+  const typedForms = [...new Set([tokens, tokens.map(tok => formsOf(tok).find(f => f !== tok && !f.includes(' ')) || tok)]
+    .map(list => list.join(' ').replace(/[-‐-―]/g, ' ')))]
+  // A search that is only muscle or body-part words ranks by what the exercise trains and how
+  // common it is, not by which names happen to contain the word: otherwise "chest" opens on
+  // "above head chest stretch". A stretch only leads when the search asks for one.
+  const bodyTok = tok => formsOf(tok).some(f => found.some(e => bodyWordsOf(e).has(f)))
+  const bodyMode = tokens.length > 0 && tokens.every(bodyTok)
+  const wantsStretch = tokens.some(tok => /^(stretch|mobil|yoga|dehn|étir|estir|allung)/.test(tok))
+  const scored = found.map((e, i) => {
+    const entry = corpusOf(e)
+    if (bodyMode) {
+      const bw = bodyWordsOf(e)
+      const trains = tokens.every(tok => formsOf(tok).some(f => bw.has(f)))
+      const named = Math.min(60, tokens.reduce((sum, tok) => sum + tokenScore(entry, tok, ctx), 0))
+      const score = (trains ? 70 : named) + (STAPLES.has(e.id) ? 30 : 0) + priorOf(e)
+        + (STRETCHY.has(e.cat) && !wantsStretch ? -25 : 0)
+      return { e, i, score, len: entry.nameWords.length }
+    }
+    // The name exactly as typed wins outright ("burpee" before "dumbbell burpee"), and every
+    // word the name has beyond the query costs a little, more than the equipment preference.
+    const plain = entry.name.split(' (')[0].replace(/[-‐-―]/g, ' ')
+    const whole = wholeNameScore(plain, typedForms)
+    const extra = Math.max(0, entry.nameWords.length - tokens.length) * 3
+    return { e, i, score: tokens.reduce((sum, tok) => sum + tokenScore(entry, tok, ctx), 0) + priorOf(e) + whole - extra, len: entry.nameWords.length }
   })
+  scored.sort((a, b) => b.score - a.score || a.len - b.len || a.i - b.i)
+  return scored.map(x => x.e)
 }
 
-export const QUICK_EQ_PRESETS = [
-  { id: '', label: 'All Gear' },
-  { id: 'machine', label: 'Machine', icon: 'gear', match: eq => (eq || '').includes('machine') || eq === 'assisted' || eq === 'sled machine' || eq === 'stationary bike' },
-  { id: 'cable', label: 'Cable', icon: 'link', match: eq => eq === 'cable' },
-  { id: 'dumbbell', label: 'Dumbbell', icon: 'dumbbell', match: eq => eq === 'dumbbell' },
-  { id: 'barbell', label: 'Barbell', icon: 'dumbbell', match: eq => (eq || '').includes('barbell') || (eq || '').includes('trap bar') },
-  { id: 'bodyweight', label: 'Bodyweight', icon: 'figureStrength', match: eq => eq === 'body weight' },
-]
-
-export const QUICK_MUSCLE_GROUPS = [
-  { id: '', label: 'All' },
-  { id: 'chest', label: 'Chest' },
-  { id: 'back', label: 'Back' },
-  { id: 'legs', label: 'Legs' },
-  { id: 'shoulders', label: 'Shoulders' },
-  { id: 'arms', label: 'Arms' },
-  { id: 'core', label: 'Core' },
-]
-
-export function matchesMuscleGroup(e, group) {
-  if (!group || group === 'all') return true
-  if (group === 'chest') return e?.bp === 'chest' || e?.tg === 'pectorals'
-  if (group === 'back') return e?.bp === 'back' || e?.tg === 'lats' || e?.tg === 'upper back' || e?.tg === 'spine'
-  if (group === 'legs') return e?.bp === 'upper legs' || e?.bp === 'lower legs' || e?.tg === 'quads' || e?.tg === 'hamstrings' || e?.tg === 'calves' || e?.tg === 'glutes'
-  if (group === 'shoulders') return e?.bp === 'shoulders' || e?.tg === 'delts'
-  if (group === 'arms') return e?.bp === 'upper arms' || e?.bp === 'lower arms' || e?.tg === 'biceps' || e?.tg === 'triceps'
-  if (group === 'core') return e?.bp === 'waist' || e?.tg === 'abs'
-  return e?.bp === group
+// Exercises that come close to a query without matching all of it: most of the words found, or
+// the words found with more typos than the exact search allows, or the name of something
+// similar. For the "Similar exercises" section under the results, so a search almost never ends
+// on "No match". `exclude` holds what the exact search already listed. Best first, at most `limit`.
+export function similarExercises(list, query, exclude = [], limit = 30) {
+  const tokens = queryTokens(query)
+  if (!tokens.length) return []
+  resetNearCache()
+  const skip = new Set(exclude)
+  // What the exact hits train most: "similar" leans towards the same muscle, so a curl search
+  // offers other biceps work rather than anything else that happens to say "dumbbell".
+  const tgCount = {}
+  for (const e of exclude.slice(0, 8)) if (e?.tg) tgCount[e.tg] = (tgCount[e.tg] || 0) + 1
+  const mainTg = Object.keys(tgCount).sort((a, b) => tgCount[b] - tgCount[a])[0]
+  for (const e of list) corpusOf(e)   // fills the vocabulary before it is searched
+  const ctx = queryContext(tokens)
+  const out = []
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i]
+    if (skip.has(e)) continue
+    const entry = corpusOf(e)
+    let score = 0, found = 0
+    for (const tok of tokens) {
+      let best = tokenScore(entry, tok, ctx)
+      // One more typo than the exact search allows, name words only.
+      if (!best && formsOf(tok).some(f => { const c = ctx.get(f); return c && entry.nameWords.some(w => c.extra.has(w)) })) best = 25
+      if (best) { found++; score += best }
+    }
+    // Half the words at least (one of one, one of two, two of three...), and for a one-word query
+    // a hit in the name, not just a shared body part.
+    if (found * 2 < tokens.length || !found || (tokens.length === 1 && score < 25)) continue
+    out.push({ e, i, score: score + found * 30 + priorOf(e) + (mainTg && e.tg === mainTg ? 40 : 0), len: entry.nameWords.length })
+  }
+  out.sort((a, b) => b.score - a.score || a.len - b.len || a.i - b.i)
+  return out.slice(0, limit).map(x => x.e)
 }
-
-export function usageMap(st) {
-  const u = {}
-  if (!st) return u
-  st.routines?.forEach(r => r.ex?.forEach(e => { u[e.id] = (u[e.id] || 0) + 1 }))
-  st.workouts?.forEach(w => w.entries?.forEach(e => { u[e.id] = (u[e.id] || 0) + 1 }))
-  return u
-}
-

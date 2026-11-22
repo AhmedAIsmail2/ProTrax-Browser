@@ -12,11 +12,13 @@ import Icon from '../components/Icon.jsx'
 import { Button } from '../components/ui.jsx'
 import { tappable } from '../lib/use-sheet-keyboard.js'
 import { glyphOf } from '../lib/glyphs.js'
-import { openTutorial, TutorialWelcomeCard, hasSeenTutorial } from '../components/TutorialDialog.jsx'
 import ActivityHeatmap from '../components/ActivityHeatmap.jsx'
-import RecoveryMap from '../components/RecoveryMap.jsx'
 import PRWall from '../components/PRWall.jsx'
+import RecoveryHint from '../components/RecoveryHint.jsx'
 import { LB_TO_KG } from '../lib/recovery.js'
+import { weighInAt } from '../lib/bodyweight.js'
+import CardHead from '../components/CardHead.jsx'
+import { isOn } from '../lib/modules.js'
 import BrandName from '../components/BrandName.jsx'
 
 function formatElapsed(start) {
@@ -46,9 +48,7 @@ function ActiveDuration({ start }) {
 export default function Home() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
-  const user = useStore(s => s.user)
   const [weekOffset, setWeekOffset] = useState(0)
-  const [welcomeDismissed, setWelcomeDismissed] = useState(false)
 
   const today = new Date()
   const routine = effectiveRoutine(S, todayISO())
@@ -85,7 +85,7 @@ export default function Home() {
   const plannedPerWeek = S.weekExtra?.length
     ? Array.from({ length: 7 }, (_, i) => { const d = new Date(wkStart); d.setDate(wkStart.getDate() + i); return effectiveRoutineId(S, isoOf(d)) }).filter(Boolean).length
     : Object.keys(S.week).filter(k => S.week[k]).length
-  const bwPoints = S.bodyweight.slice(-30).map(b => ({ t: b.t || new Date(b.d).getTime(), y: b.w, d: b.d }))
+  const bwPoints = S.bodyweight.slice(-30).map(b => ({ t: weighInAt(b), y: b.w, d: b.d }))
 
   // today's session shown right under the week strip
   const onToday = () => { if (S.active) nav('/workout'); else if (routine) startFlow(routine.id); else dayOverrideSheet(todayISO()) }
@@ -133,9 +133,8 @@ export default function Home() {
 
   return <div className="narrow">
     <div className="hdr home-sticky-header">
-      <div><h1>{user ? t('Hi {0}', user.name) : <BrandName />}</h1><div className="sub">{today.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
+      <div><h1><BrandName /></h1><div className="sub">{today.toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
       <div className="row" style={{ gap: 6 }}>
-        <button className="iconbtn" onClick={() => openTutorial(0)} aria-label={t('Tutorial & Guide')} title={t('Tutorial & Guide')}><Icon name="help" /></button>
         <button className="iconbtn" onClick={() => nav('/settings')} aria-label={t('Settings')}><Icon name="gear" /></button>
       </div>
     </div>
@@ -262,10 +261,6 @@ export default function Home() {
       </div>
     )}
 
-    {S.workouts.length === 0 && !welcomeDismissed && !hasSeenTutorial() && (
-      <TutorialWelcomeCard onDismiss={() => setWelcomeDismissed(true)} />
-    )}
-
     <div className="card">
       <div className="row between" style={{ marginBottom: 8 }}>
         <button className="iconbtn" style={{ width: 30, height: 30, fontSize: 15 }} onClick={() => setWeekOffset(w => w - 1)} aria-label="Previous week"><Icon name="chevronLeft" /></button>
@@ -324,17 +319,16 @@ export default function Home() {
         </div>
         <div className="muted small" style={{ marginBottom: 12 }}>{t('Set up your weekly routine to get going — or load a ready-made starter plan.')}</div>
         <Button variant="primary" icon="sparkles" onClick={starterPlanSheet}>{t('Load starter plan')}</Button>
-        <div style={{ height: 8 }} /><Button icon="lightbulb" onClick={() => openTutorial(0)}>{t('How ProTraX works (Tour)')}</Button>
         <div style={{ height: 8 }} /><Button onClick={() => nav('/plan')}>{t('Build my own plan')}</Button>
       </div>
     )}
 
-    <div className="card">
+    {isOn(S, 'body') && S.showWeightCard !== false && <div className="card">
+      <CardHead icon="scale" tint="var(--teal)" title={t('Body weight')} className="bw-head"
+        action={<Button type="button" size="sm" icon="plus" onClick={() => bwSheet()}>{t('Log')}</Button>} />
       <div className="row between" style={{ marginBottom: 6 }}>
-        <h2 style={{ margin: 0 }}>{t('Body weight')}</h2>
         <div className="row" style={{ gap: 8 }}>
-          <Button size="sm" icon="target" style={S.targetW ? { color: 'var(--yellow)' } : undefined} onClick={goalSheet}>{S.targetW ? fmtNum(S.targetW) : t('Goal')}</Button>
-          <Button size="sm" icon="plus" onClick={() => bwSheet()}>{t('Log')}</Button>
+          <Button type="button" size="sm" icon="target" style={S.targetW ? { color: 'var(--gold-ink)' } : undefined} onClick={goalSheet}>{S.targetW ? fmtNum(S.targetW) : t('Goal')}</Button>
         </div>
       </div>
       {bw ? <>
@@ -356,8 +350,10 @@ export default function Home() {
           </div>
         )}
         <div className="chart" style={{ marginTop: 8 }}><LineChart points={bwPoints} h={130} unit={S.unit} goal={S.targetW} /></div>
-      </> : <div className="muted small">{t("No entries yet — log your weight to start the curve. It's also asked before every workout.")}</div>}
-    </div>
+      </> : <div className="muted small">{S.weighIn === false
+        ? t('No weigh-ins yet. Log your weight to start the curve.')
+        : t("No weigh-ins yet. Log your weight to start the curve (we also ask before every workout).")}</div>}
+    </div>}
 
     <div className="card tappable" style={{ cursor: 'pointer' }} {...tappable(() => calendarSheet())}>
       <div className="row between">
@@ -390,7 +386,7 @@ export default function Home() {
           <h2 style={{ margin: 0 }}>{t('Muscle recovery')}</h2>
           <span className="dim small">{t('Readiness')}</span>
         </div>
-        <RecoveryMap workouts={S.workouts} body={S.body} unit={S.unit} bodyweightKg={bodyweightKg} />
+        <RecoveryHint S={S} />
       </div>
     )}
 

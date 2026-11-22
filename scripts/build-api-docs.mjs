@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Builds website/api.html — the static API reference — from api/openapi.yaml.
+// Builds website/api.html (the static API reference) from api/openapi.yaml.
 //
 //   node scripts/build-api-docs.mjs
+//   node scripts/build-api-docs.mjs --check   # fail if stale, never write (CI)
 //
 // Deterministic: the same spec always produces byte-identical output (no
 // timestamps), so re-running it only dirties the file when the spec changed.
 // The page is plain HTML in the site's own design (styles.css + site.js) with
-// native <details> cards per endpoint — no Swagger UI, no runtime rendering.
+// native <details> cards per endpoint. No Swagger UI, no runtime rendering.
 //
 // js-yaml lives in the repo-root package.json (devDependency, build-time only).
 
@@ -18,7 +19,14 @@ import yaml from 'js-yaml'
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const specPath = path.join(root, 'api', 'openapi.yaml')
 const outPath = path.join(root, 'website', 'api.html')
+const check = process.argv.includes('--check')
 const spec = yaml.load(fs.readFileSync(specPath, 'utf8'))
+
+// The cache-busting ?v= the website's pages share. index.html is the one place it is bumped;
+// a copy here drifted to an older number and turned --check red on every branch (#795).
+const indexHtml = fs.readFileSync(path.join(root, 'website', 'index.html'), 'utf8')
+const assetVersion = /styles\.css\?v=(\d+)/.exec(indexHtml)?.[1]
+if (!assetVersion) throw new Error('website/index.html has no styles.css?v=N to take the version from')
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -29,7 +37,7 @@ const esc = s => String(s)
 const mdInline = s => esc(String(s).trim())
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-  .replace(/(^|[\s(—>])\*([^*\n]+)\*(?=[\s.,;:)—]|$)/g, '$1<i>$2</i>')
+  .replace(/(^|[\s(\u2014>])\*([^*\n]+)\*(?=[\s.,;:)\u2014]|$)/g, '$1<i>$2</i>')
   .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" rel="noopener">$1</a>')
 
 // One description onto one line (for table cells and card subtitles).
@@ -123,10 +131,18 @@ const TAGS = {
   meta: { title: 'Meta', side: 'Health &amp; public config' },
   auth: { title: 'Auth', side: 'Passkeys &amp; sessions' },
   pairing: { title: 'Pairing', side: 'Connect the mobile app' },
+  watch: { title: 'Watch relay', side: 'Zepp OS watches' },
+  password: { title: 'Password', side: 'Optional name &amp; password (PASSWORD_LOGIN)' },
+  passkeys: { title: 'Passkeys', side: 'More passkeys &amp; device links' },
   data: { title: 'Data', side: 'State sync' },
   push: { title: 'Push', side: 'Notifications &amp; rest timer' },
   activity: { title: 'Activity', side: 'Live presence' },
-  admin: { title: 'Admin', side: 'Users, invites, audit log' }
+  media: { title: 'Media', side: 'Photos &amp; videos of your exercises &amp; workouts' },
+  // A tag missing from this map renders nowhere at all, silently, so every tag in the
+  // spec needs a line here.
+  coach: { title: 'AI Coach', side: 'Plans, reviews, debriefs' },
+  integrations: { title: 'Integrations', side: 'Webhooks (INTEGRATIONS)' },
+  admin: { title: 'Admin', side: 'Users, invites, audit log, Coach' }
 }
 
 // "Admin: list all users" → "List all users": the section heading and the ADMIN
@@ -138,17 +154,17 @@ const sumText = s => {
 
 function authOf (op, tag) {
   if (Array.isArray(op.security) && op.security.length === 0) {
-    return { chip: 'public', line: 'Public — no authentication required.' }
+    return { chip: 'public', line: 'Public: no authentication required.' }
   }
   if (tag === 'admin') {
     return {
       chip: 'admin',
-      line: 'Admin only — a signed-in session whose user is an admin (<code>ADMIN_UIDS</code> or <code>admin:true</code>), as the session cookie or a Bearer token.'
+      line: 'Admin only: a signed-in session whose user is an admin (<code>ADMIN_UIDS</code> or <code>admin:true</code>), as the session cookie or a Bearer token.'
     }
   }
   return {
     chip: null,
-    line: 'Requires a session — the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.'
+    line: 'Requires a session: the cookie set at sign-in, or <code>Authorization: Bearer &lt;token&gt;</code> from mobile-app pairing.'
   }
 }
 
@@ -203,7 +219,7 @@ function endpointCard (pathKey, method, op) {
     type: fmtType(p.schema),
     desc: p.description || ''
   }))
-  // p.name may contain markup now; ptab escapes r.name — build rows pre-escaped instead:
+  // p.name may contain markup now; ptab escapes r.name, so build rows pre-escaped instead:
   const paramTab = params.length
     ? `<p class="ep-h">Query parameters</p><div class="ptab">` + params.map(r => `
   <div class="prow">
@@ -236,7 +252,7 @@ ${bodyHtml}
 /* -------------------------------------------------------------- schema cards */
 
 // A schema has no summary of its own, so the collapsed row borrows the first
-// sentence of its description — and the body then starts at the second, rather
+// sentence of its description, and the body then starts at the second, rather
 // than repeating what the reader just read on the way in.
 function schemaCard (name, s) {
   const desc = (s.description || '').trim()
@@ -261,7 +277,7 @@ ${rows.length ? ptab(rows) : '<p class="p-desc">Free-form object.</p>'}
 
 /* ----------------------------------------------------------------- overview */
 
-// The spec's info.description carries "### Heading" sections — each becomes a card.
+// The spec's info.description carries "### Heading" sections; each becomes a card.
 const infoParts = spec.info.description.split(/^### /m).slice(1).map(chunk => {
   const nl = chunk.indexOf('\n')
   return { title: chunk.slice(0, nl).trim(), body: chunk.slice(nl + 1) }
@@ -308,7 +324,7 @@ const railTags = Object.keys(TAGS).map(tag =>
 
 const css = `
 /* ------------------------------------------------------------- API reference
-   Generated page — the reference itself is static HTML in the site's design.
+   Generated page. The reference itself is static HTML in the site's design.
    Layout: one 880px column of per-endpoint <details> cards. */
 main.api-main { max-width: 880px; margin: 0 auto; padding: clamp(44px, 7vw, 72px) var(--pad) 0; }
 main.api-main h1 { font-size: clamp(36px, 6.5vw, 60px); letter-spacing: -.03em; }
@@ -423,12 +439,12 @@ main.api-main .lead { color: var(--fg-2); max-width: 58ch; margin: 14px 0 0; fon
 /* The header, the navigation sheet and the contents drawer belong to the site, not
    to this page: .navsheet, .toc-btn, .side and .rail-close live in styles.css and
    site.js and behave identically here, on the docs page and on the home page. This
-   file deliberately adds nothing of its own to them — one implementation is the
+   file deliberately adds nothing of its own to them. One implementation is the
    only way the two rail pages can feel like the same rail. */
 `
 
 const js = `
-/* Jumping to an anchor inside a collapsed card opens the card — and re-aligns, since
+/* Jumping to an anchor inside a collapsed card opens the card and re-aligns, since
    the browser scrolled to where the target was while it was still collapsed. */
 ;(() => {
   const openTo = id => {
@@ -458,57 +474,60 @@ document.querySelectorAll('[data-xall]').forEach(b => b.addEventListener('click'
 
 const html = `<!DOCTYPE html>
 <!-- GENERATED FILE - do not edit by hand.
-     Built by scripts/build-api-docs.mjs from api/openapi.yaml (SmiTriX API v${spec.info.version}).
+     Built by scripts/build-api-docs.mjs from api/openapi.yaml (ProTraX API v${spec.info.version}).
      Regenerate with: node scripts/build-api-docs.mjs -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>API — SmiTriX</title>
-<meta name="description" content="The complete SmiTriX HTTP API, documented as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
+<title>ProTraX: API</title>
+<meta name="description" content="The complete ProTraX HTTP API, documented as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
 <meta name="theme-color" content="#000000">
-<meta property="og:title" content="SmiTriX API reference">
-<meta property="og:description" content="The complete SmiTriX HTTP API as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
-<meta property="og:image" content="/img/banner.png">
-<meta property="og:url" content="/api.html">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="preconnect" href="https://stats.duarte-santos.ch">
+<meta property="og:title" content="ProTraX API reference">
+<meta property="og:description" content="The complete ProTraX HTTP API as an OpenAPI spec: passkey auth, state sync, push notifications, pairing and admin routes.">
+<meta property="og:image" content="https://opengym.ch/img/social.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ProTraX: your training, your data, your server. Two phones showing the home and workout screens.">
+<meta property="og:url" content="https://opengym.ch/api.html">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="SmiTriX">
+<meta property="og:site_name" content="ProTraX">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="SmiTriX API reference">
-<meta name="twitter:image" content="/img/banner.png">
-<link rel="canonical" href="api.html">
-<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
-<link rel="icon" type="image/png" sizes="180x180" href="icon-180.png">
+<meta name="twitter:title" content="ProTraX API reference">
+<meta name="twitter:image" content="https://opengym.ch/img/social.jpg">
+<link rel="canonical" href="https://opengym.ch/api.html">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="96x96" href="/icon-96.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
 <link rel="apple-touch-icon" href="icon-180.png">
-<link rel="stylesheet" href="styles.css?v=21">
-<script>
-document.documentElement.className += ' js'
-try {
-  const savedAccent = localStorage.getItem('smitrix_accent')
-  if (savedAccent) document.documentElement.setAttribute('data-accent', savedAccent)
-} catch (e) {}
-</script>
+<link rel="stylesheet" href="styles.css?v=${assetVersion}">
+<script>document.documentElement.className += ' js'</script>
+<!-- Umami web analytics for opengym.ch (self-hosted, cookieless). -->
+<script defer src="https://stats.duarte-santos.ch/script.js" data-website-id="db36019e-50f4-453c-9c56-d0588aefe233"></script>
 <style>${css}</style>
 </head>
-<body class="topnav">
+<body class="topnav dock">
+<a class="skip" href="#main">Skip to content</a>
 
 <nav><div class="wrap nav-in">
-  <a class="brand" href="index.html">
+  <a class="brand" href="/">
     <img src="icon-180.png" alt="" width="24" height="24">
-    SmiTriX
+    ProTraX
   </a>
   <div class="nav-quick">
-    <a class="ql site" href="index.html#features">Features</a>
-    <a class="ql site" href="index.html#screens">Screenshots</a>
-    <a class="ql site" href="index.html#demo">Demo</a>
-    <a class="ql site" href="docs.html">Docs</a>
-    <a class="ql site" href="api.html">API</a>
-    <a class="ql site" href="about.html">About</a>
-    <a class="ql" href="https://github.com/SmitroniX/SmiTriX" rel="noopener">GitHub</a>
-    <a class="ql" href="https://gitlab.com/jogdandasmit/SmiTriX" rel="noopener">GitLab <span data-gh="stars"></span></a>
-    <a class="ql" href="https://discord.gg/ZFQV5dza9P" rel="noopener">Discord <span data-dc="members"></span></a>
-    <a class="ql coffee" href="https://buymeacoffee.com/asmit_jogdand" rel="noopener" aria-label="Buy me a coffee"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.216 6.415l-.132-.666c-.119-.598-.388-1.163-1.001-1.379-.197-.069-.42-.098-.57-.241-.152-.143-.196-.366-.231-.572-.065-.378-.125-.756-.192-1.133-.057-.325-.102-.69-.25-.987-.195-.4-.597-.634-.996-.788a5.723 5.723 0 00-.626-.194c-1-.263-2.05-.36-3.077-.416a25.834 25.834 0 00-3.7.062c-.915.083-1.88.184-2.75.5-.318.116-.646.256-.888.501-.297.302-.393.77-.177 1.146.154.267.415.456.692.58.36.162.737.284 1.123.366 1.075.238 2.189.331 3.287.37 1.218.05 2.437.01 3.65-.118.299-.033.598-.073.896-.119.352-.054.578-.513.474-.834-.124-.383-.457-.531-.834-.473-.466.074-.96.108-1.382.146-1.177.08-2.358.082-3.536.006a22.228 22.228 0 01-1.157-.107c-.086-.01-.18-.025-.258-.036-.243-.036-.484-.08-.724-.13-.111-.027-.111-.185 0-.212h.005c.277-.06.557-.108.838-.147h.002c.131-.009.263-.032.394-.048a25.076 25.076 0 013.426-.12c.674.019 1.347.067 2.017.144l.228.031c.267.04.533.088.798.145.392.085.895.113 1.07.542.055.137.08.288.111.431l.319 1.484a.237.237 0 01-.199.284h-.003c-.037.006-.075.01-.112.015a36.704 36.704 0 01-4.743.295 37.059 37.059 0 01-4.699-.304c-.14-.017-.293-.042-.417-.06-.326-.048-.649-.108-.973-.161-.393-.065-.768-.032-1.123.161-.29.16-.527.404-.675.701-.154.316-.199.66-.267 1-.069.34-.176.707-.135 1.056.087.753.613 1.365 1.37 1.502a39.69 39.69 0 0011.343.376.483.483 0 01.535.53l-.071.697-1.018 9.907c-.041.41-.047.832-.125 1.237-.122.637-.553 1.028-1.182 1.171-.577.131-1.165.2-1.756.205-.656.004-1.31-.025-1.966-.022-.699.004-1.556-.06-2.095-.58-.475-.458-.54-1.174-.605-1.793l-.731-7.013-.322-3.094c-.037-.351-.286-.695-.678-.678-.336.015-.718.3-.678.679l.228 2.185.949 9.112c.147 1.344 1.174 2.068 2.446 2.272.742.12 1.503.144 2.257.156.966.016 1.942.053 2.892-.122 1.408-.258 2.465-1.198 2.616-2.657.34-3.332.683-6.663 1.024-9.995l.215-2.087a.484.484 0 01.39-.426c.402-.078.787-.212 1.074-.518.455-.488.546-1.124.385-1.766zm-1.478.772c-.145.137-.363.201-.578.233-2.416.359-4.866.54-7.308.46-1.748-.06-3.477-.254-5.207-.498-.17-.024-.353-.055-.47-.18-.22-.236-.111-.71-.054-.995.052-.26.152-.609.463-.646.484-.057 1.046.148 1.526.22.577.088 1.156.159 1.737.212 2.48.226 5.002.19 7.472-.14.45-.06.899-.13 1.345-.21.399-.072.84-.206 1.08.206.166.281.188.657.162.974a.544.544 0 01-.169.364zm-6.159 3.9c-.862.37-1.84.788-3.109.788a5.884 5.884 0 01-1.569-.217l.877 9.004c.065.78.717 1.38 1.5 1.38 0 0 1.243.065 1.658.065.447 0 1.786-.065 1.786-.065.783 0 1.434-.6 1.499-1.38l.94-9.95a3.996 3.996 0 00-1.322-.238c-.826 0-1.491.284-2.26.613z"/></svg><span>Buy me a coffee!</span></a>
-    <a class="cta" href="index.html#download">Download</a>
+    <a class="ql site" href="/#features">Features</a>
+    <a class="ql site" href="/#screens">Screenshots</a>
+    <a class="ql site" href="/#demo">Demo</a>
+    <a class="ql site" href="/docs.html">Docs</a>
+    <a class="ql site" href="/api.html">API</a>
+    <a class="ql site" href="/about.html">About</a>
+    <a class="ql" href="https://github.com/DuarteSantos8/openGym" rel="noopener">GitHub <span data-gh="stars"></span></a>
+    <a class="ql" href="https://discord.gg/e62jY6fwVb" rel="noopener">Discord <span data-dc="members"></span></a>
+    <a class="ql coffee" href="https://buymeacoffee.com/duartesantos" rel="noopener" aria-label="Buy me a coffee"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.216 6.415l-.132-.666c-.119-.598-.388-1.163-1.001-1.379-.197-.069-.42-.098-.57-.241-.152-.143-.196-.366-.231-.572-.065-.378-.125-.756-.192-1.133-.057-.325-.102-.69-.25-.987-.195-.4-.597-.634-.996-.788a5.723 5.723 0 00-.626-.194c-1-.263-2.05-.36-3.077-.416a25.834 25.834 0 00-3.7.062c-.915.083-1.88.184-2.75.5-.318.116-.646.256-.888.501-.297.302-.393.77-.177 1.146.154.267.415.456.692.58.36.162.737.284 1.123.366 1.075.238 2.189.331 3.287.37 1.218.05 2.437.01 3.65-.118.299-.033.598-.073.896-.119.352-.054.578-.513.474-.834-.124-.383-.457-.531-.834-.473-.466.074-.96.108-1.382.146-1.177.08-2.358.082-3.536.006a22.228 22.228 0 01-1.157-.107c-.086-.01-.18-.025-.258-.036-.243-.036-.484-.08-.724-.13-.111-.027-.111-.185 0-.212h.005c.277-.06.557-.108.838-.147h.002c.131-.009.263-.032.394-.048a25.076 25.076 0 013.426-.12c.674.019 1.347.067 2.017.144l.228.031c.267.04.533.088.798.145.392.085.895.113 1.07.542.055.137.08.288.111.431l.319 1.484a.237.237 0 01-.199.284h-.003c-.037.006-.075.01-.112.015a36.704 36.704 0 01-4.743.295 37.059 37.059 0 01-4.699-.304c-.14-.017-.293-.042-.417-.06-.326-.048-.649-.108-.973-.161-.393-.065-.768-.032-1.123.161-.29.16-.527.404-.675.701-.154.316-.199.66-.267 1-.069.34-.176.707-.135 1.056.087.753.613 1.365 1.37 1.502a39.69 39.69 0 0011.343.376.483.483 0 01.535.53l-.071.697-1.018 9.907c-.041.41-.047.832-.125 1.237-.122.637-.553 1.028-1.182 1.171-.577.131-1.165.2-1.756.205-.656.004-1.31-.025-1.966-.022-.699.004-1.556-.06-2.095-.58-.475-.458-.54-1.174-.605-1.793l-.731-7.013-.322-3.094c-.037-.351-.286-.695-.678-.678-.336.015-.718.3-.678.679l.228 2.185.949 9.112c.147 1.344 1.174 2.068 2.446 2.272.742.12 1.503.144 2.257.156.966.016 1.942.053 2.892-.122 1.408-.258 2.465-1.198 2.616-2.657.34-3.332.683-6.663 1.024-9.995l.215-2.087a.484.484 0 01.39-.426c.402-.078.787-.212 1.074-.518.455-.488.546-1.124.385-1.766zm-1.478.772c-.145.137-.363.201-.578.233-2.416.359-4.866.54-7.308.46-1.748-.06-3.477-.254-5.207-.498-.17-.024-.353-.055-.47-.18-.22-.236-.111-.71-.054-.995.052-.26.152-.609.463-.646.484-.057 1.046.148 1.526.22.577.088 1.156.159 1.737.212 2.48.226 5.002.19 7.472-.14.45-.06.899-.13 1.345-.21.399-.072.84-.206 1.08.206.166.281.188.657.162.974a.544.544 0 01-.169.364zm-6.159 3.9c-.862.37-1.84.788-3.109.788a5.884 5.884 0 01-1.569-.217l.877 9.004c.065.78.717 1.38 1.5 1.38 0 0 1.243.065 1.658.065.447 0 1.786-.065 1.786-.065.783 0 1.434-.6 1.499-1.38l.94-9.95a3.996 3.996 0 00-1.322-.238c-.826 0-1.491.284-2.26.613z"/></svg><span>Buy me a coffee!</span></a>
+    <a class="cta" href="/#download">Download</a>
   </div>
   <button class="nav-toggle" id="navtoggle" aria-expanded="false" aria-controls="sitemenu" aria-label="Menu">
     <span></span><span></span>
@@ -517,34 +536,19 @@ try {
 
 <!-- The navigation sheet: the header's links again, for the widths where the bar has
      room only for the brand and the download. Byte-identical on every page, like the
-     bar above it — nothing is ever dropped because of which page you are on. -->
+     bar above it, so nothing is ever dropped because of which page you are on. -->
 <div class="navsheet" id="sitemenu" role="navigation" aria-label="Site" aria-hidden="true">
   <div class="nl-rows">
-    <a class="nl" href="index.html#features">Features</a>
-    <a class="nl" href="index.html#screens">Screenshots</a>
-    <a class="nl" href="index.html#demo">Demo</a>
-    <a class="nl" href="docs.html">Docs</a>
-    <a class="nl" href="api.html">API</a>
-    <a class="nl" href="about.html">About</a>
-    <a class="nl" href="https://github.com/SmitroniX/SmiTriX" rel="noopener">GitHub</a>
-    <a class="nl" href="https://gitlab.com/jogdandasmit/SmiTriX" rel="noopener">GitLab <span data-gh="stars"></span></a>
-    <a class="nl" href="https://discord.gg/ZFQV5dza9P" rel="noopener">Discord <span data-dc="members"></span></a>
-    <a class="nl coffee" href="https://buymeacoffee.com/asmit_jogdand" rel="noopener">Buy me a coffee! <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.216 6.415l-.132-.666c-.119-.598-.388-1.163-1.001-1.379-.197-.069-.42-.098-.57-.241-.152-.143-.196-.366-.231-.572-.065-.378-.125-.756-.192-1.133-.057-.325-.102-.69-.25-.987-.195-.4-.597-.634-.996-.788a5.723 5.723 0 00-.626-.194c-1-.263-2.05-.36-3.077-.416a25.834 25.834 0 00-3.7.062c-.915.083-1.88.184-2.75.5-.318.116-.646.256-.888.501-.297.302-.393.77-.177 1.146.154.267.415.456.692.58.36.162.737.284 1.123.366 1.075.238 2.189.331 3.287.37 1.218.05 2.437.01 3.65-.118.299-.033.598-.073.896-.119.352-.054.578-.513.474-.834-.124-.383-.457-.531-.834-.473-.466.074-.96.108-1.382.146-1.177.08-2.358.082-3.536.006a22.228 22.228 0 01-1.157-.107c-.086-.01-.18-.025-.258-.036-.243-.036-.484-.08-.724-.13-.111-.027-.111-.185 0-.212h.005c.277-.06.557-.108.838-.147h.002c.131-.009.263-.032.394-.048a25.076 25.076 0 013.426-.12c.674.019 1.347.067 2.017.144l.228.031c.267.04.533.088.798.145.392.085.895.113 1.07.542.055.137.08.288.111.431l.319 1.484a.237.237 0 01-.199.284h-.003c-.037.006-.075.01-.112.015a36.704 36.704 0 01-4.743.295 37.059 37.059 0 01-4.699-.304c-.14-.017-.293-.042-.417-.06-.326-.048-.649-.108-.973-.161-.393-.065-.768-.032-1.123.161-.29.16-.527.404-.675.701-.154.316-.199.66-.267 1-.069.34-.176.707-.135 1.056.087.753.613 1.365 1.37 1.502a39.69 39.69 0 0011.343.376.483.483 0 01.535.53l-.071.697-1.018 9.907c-.041.41-.047.832-.125 1.237-.122.637-.553 1.028-1.182 1.171-.577.131-1.165.2-1.756.205-.656.004-1.31-.025-1.966-.022-.699.004-1.556-.06-2.095-.58-.475-.458-.54-1.174-.605-1.793l-.731-7.013-.322-3.094c-.037-.351-.286-.695-.678-.678-.336.015-.718.3-.678.679l.228 2.185.949 9.112c.147 1.344 1.174 2.068 2.446 2.272.742.12 1.503.144 2.257.156.966.016 1.942.053 2.892-.122 1.408-.258 2.465-1.198 2.616-2.657.34-3.332.683-6.663 1.024-9.995l.215-2.087a.484.484 0 01.39-.426c.402-.078.787-.212 1.074-.518.455-.488.546-1.124.385-1.766zm-1.478.772c-.145.137-.363.201-.578.233-2.416.359-4.866.54-7.308.46-1.748-.06-3.477-.254-5.207-.498-.17-.024-.353-.055-.47-.18-.22-.236-.111-.71-.054-.995.052-.26.152-.609.463-.646.484-.057 1.046.148 1.526.22.577.088 1.156.159 1.737.212 2.48.226 5.002.19 7.472-.14.45-.06.899-.13 1.345-.21.399-.072.84-.206 1.08.206.166.281.188.657.162.974a.544.544 0 01-.169.364zm-6.159 3.9c-.862.37-1.84.788-3.109.788a5.884 5.884 0 01-1.569-.217l.877 9.004c.065.78.717 1.38 1.5 1.38 0 0 1.243.065 1.658.065.447 0 1.786-.065 1.786-.065.783 0 1.434-.6 1.499-1.38l.94-9.95a3.996 3.996 0 00-1.322-.238c-.826 0-1.491.284-2.26.613z\"/></svg></a>
+    <a class="nl" href="/#features">Features</a>
+    <a class="nl" href="/#screens">Screenshots</a>
+    <a class="nl" href="/#demo">Demo</a>
+    <a class="nl" href="/docs.html">Docs</a>
+    <a class="nl" href="/api.html">API</a>
+    <a class="nl" href="/about.html">About</a>
+    <a class="nl" href="https://github.com/DuarteSantos8/openGym" rel="noopener">GitHub <span data-gh="stars"></span></a>
+    <a class="nl" href="https://discord.gg/e62jY6fwVb" rel="noopener">Discord <span data-dc="members"></span></a>
+    <a class="nl coffee" href="https://buymeacoffee.com/duartesantos" rel="noopener">Buy me a coffee! <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.216 6.415l-.132-.666c-.119-.598-.388-1.163-1.001-1.379-.197-.069-.42-.098-.57-.241-.152-.143-.196-.366-.231-.572-.065-.378-.125-.756-.192-1.133-.057-.325-.102-.69-.25-.987-.195-.4-.597-.634-.996-.788a5.723 5.723 0 00-.626-.194c-1-.263-2.05-.36-3.077-.416a25.834 25.834 0 00-3.7.062c-.915.083-1.88.184-2.75.5-.318.116-.646.256-.888.501-.297.302-.393.77-.177 1.146.154.267.415.456.692.58.36.162.737.284 1.123.366 1.075.238 2.189.331 3.287.37 1.218.05 2.437.01 3.65-.118.299-.033.598-.073.896-.119.352-.054.578-.513.474-.834-.124-.383-.457-.531-.834-.473-.466.074-.96.108-1.382.146-1.177.08-2.358.082-3.536.006a22.228 22.228 0 01-1.157-.107c-.086-.01-.18-.025-.258-.036-.243-.036-.484-.08-.724-.13-.111-.027-.111-.185 0-.212h.005c.277-.06.557-.108.838-.147h.002c.131-.009.263-.032.394-.048a25.076 25.076 0 013.426-.12c.674.019 1.347.067 2.017.144l.228.031c.267.04.533.088.798.145.392.085.895.113 1.07.542.055.137.08.288.111.431l.319 1.484a.237.237 0 01-.199.284h-.003c-.037.006-.075.01-.112.015a36.704 36.704 0 01-4.743.295 37.059 37.059 0 01-4.699-.304c-.14-.017-.293-.042-.417-.06-.326-.048-.649-.108-.973-.161-.393-.065-.768-.032-1.123.161-.29.16-.527.404-.675.701-.154.316-.199.66-.267 1-.069.34-.176.707-.135 1.056.087.753.613 1.365 1.37 1.502a39.69 39.69 0 0011.343.376.483.483 0 01.535.53l-.071.697-1.018 9.907c-.041.41-.047.832-.125 1.237-.122.637-.553 1.028-1.182 1.171-.577.131-1.165.2-1.756.205-.656.004-1.31-.025-1.966-.022-.699.004-1.556-.06-2.095-.58-.475-.458-.54-1.174-.605-1.793l-.731-7.013-.322-3.094c-.037-.351-.286-.695-.678-.678-.336.015-.718.3-.678.679l.228 2.185.949 9.112c.147 1.344 1.174 2.068 2.446 2.272.742.12 1.503.144 2.257.156.966.016 1.942.053 2.892-.122 1.408-.258 2.465-1.198 2.616-2.657.34-3.332.683-6.663 1.024-9.995l.215-2.087a.484.484 0 01.39-.426c.402-.078.787-.212 1.074-.518.455-.488.546-1.124.385-1.766zm-1.478.772c-.145.137-.363.201-.578.233-2.416.359-4.866.54-7.308.46-1.748-.06-3.477-.254-5.207-.498-.17-.024-.353-.055-.47-.18-.22-.236-.111-.71-.054-.995.052-.26.152-.609.463-.646.484-.057 1.046.148 1.526.22.577.088 1.156.159 1.737.212 2.48.226 5.002.19 7.472-.14.45-.06.899-.13 1.345-.21.399-.072.84-.206 1.08.206.166.281.188.657.162.974a.544.544 0 01-.169.364zm-6.159 3.9c-.862.37-1.84.788-3.109.788a5.884 5.884 0 01-1.569-.217l.877 9.004c.065.78.717 1.38 1.5 1.38 0 0 1.243.065 1.658.065.447 0 1.786-.065 1.786-.065.783 0 1.434-.6 1.499-1.38l.94-9.95a3.996 3.996 0 00-1.322-.238c-.826 0-1.491.284-2.26.613z"/></svg></a>
   </div>
-  <div class="navsheet-accent">
-    <p class="navsheet-accent-label">Theme Accent</p>
-    <div class="accent-swatches" role="radiogroup" aria-label="Choose accent color">
-      <button class="swatch on" data-accent-pick="lime" aria-label="Lime theme" title="Lime" style="--swatch-c:#32d74b"></button>
-      <button class="swatch" data-accent-pick="sky" aria-label="Sky theme" title="Sky" style="--swatch-c:#0a84ff"></button>
-      <button class="swatch" data-accent-pick="orange" aria-label="Orange theme" title="Orange" style="--swatch-c:#ff9f0a"></button>
-      <button class="swatch" data-accent-pick="violet" aria-label="Violet theme" title="Violet" style="--swatch-c:#bf5af2"></button>
-      <button class="swatch" data-accent-pick="pink" aria-label="Pink theme" title="Pink" style="--swatch-c:#ff375f"></button>
-      <button class="swatch" data-accent-pick="red" aria-label="Red theme" title="Red" style="--swatch-c:#ff453a"></button>
-      <button class="swatch" data-accent-pick="teal" aria-label="Teal theme" title="Teal" style="--swatch-c:#40c8e0"></button>
-      <button class="swatch" data-accent-pick="gold" aria-label="Gold theme" title="Gold" style="--swatch-c:#ffd60a"></button>
-    </div>
-  </div>
-</div>
 </div>
 
 <!-- The one control that opens the contents, at every width. The drawer it opens is
@@ -555,7 +559,7 @@ try {
 </button>
 
 <!-- The contents drawer: one list, one way in, one way out. Closed by default at
-     every width, and no preference is remembered — see .side in styles.css. -->
+     every width, and no preference is remembered. See .side in styles.css. -->
 <aside class="side" id="menu" aria-label="Contents" aria-hidden="true">
   <div class="side-top">
     <p class="side-title">Contents</p>
@@ -566,18 +570,17 @@ try {
 ${railTags}
   <a class="side-link" href="#schemas"><b>Schemas</b><span>The state blob, the error shape &amp; co.</span></a>
   <p class="side-label">More</p>
-  <a class="side-link" href="index.html"><b>Home</b><span>The tour, the demo, the download</span></a>
-  <a class="side-link" href="docs.html"><b>Docs</b><span>Install, self-host, import</span></a>
-  <a class="side-link" href="about.html"><b>About</b><span>The story and the milestones</span></a>
+  <a class="side-link" href="/"><b>Home</b><span>The tour, the demo, the download</span></a>
+  <a class="side-link" href="/docs.html"><b>Docs</b><span>Install, self-host, import</span></a>
+  <a class="side-link" href="/about.html"><b>About</b><span>The story and the milestones</span></a>
 </aside>
 
-<main class="api-main">
+<main id="main" class="api-main">
   <h1>API</h1>
-  <p class="lead">Every route the SmiTriX backend serves — passkey auth, state sync,
-     push, pairing, admin — as one hand-written
-     OpenAPI&nbsp;spec. The same file lives in the repository on
-     <a href="https://github.com/SmitroniX/SmiTriX/blob/main/api/openapi.yaml" rel="noopener">GitHub</a> and
-     <a href="https://gitlab.com/jogdandasmit/SmiTriX/-/blob/main/api/openapi.yaml" rel="noopener">GitLab</a>
+  <p class="lead">Every route the ProTraX backend serves (passkey auth, state sync,
+     push, pairing, admin) as one hand-written
+     OpenAPI&nbsp;spec. The same file lives
+     <a href="https://github.com/DuarteSantos8/openGym/blob/main/api/openapi.yaml" rel="noopener">in the repository</a>
      at <code>api/openapi.yaml</code>, next to the one server file it documents.</p>
   <div class="actions api-actions">
     <a class="btn" href="openapi.yaml" download>
@@ -586,7 +589,7 @@ ${railTags}
   </div>
   <p class="api-facts">
     <span>OpenAPI ${esc(spec.openapi)}</span>
-    <span>SmiTriX v${esc(spec.info.version)}</span>
+    <span>ProTraX v${esc(spec.info.version)}</span>
     <span>${ops.length} endpoints</span>
     <span>${esc(spec.info.license.name)}</span>
   </p>
@@ -610,7 +613,7 @@ ${tagSections}
   <section class="api-sec" id="schemas">
     <h2>Schemas</h2>
     <p class="sub">The named shapes the endpoints above link to. The <code>State</code> blob
-       is <b>representative, not enforced</b> — the server stores it opaquely and the app
+       is <b>representative, not enforced</b>: the server stores it opaquely and the app
        grows it over time.</p>
     <div class="eps">
 ${schemaCards}
@@ -619,28 +622,40 @@ ${schemaCards}
 </main>
 
 <footer><div class="wrap foot">
-  <span class="c">SmiTriX · AGPL-3.0 · © 2026 SmitroniX</span>
+  <span class="c">ProTraX · AGPL-3.0 · © 2026 <a href="https://duarte-santos.ch" rel="noopener">Duarte Santos</a></span>
   <div class="links">
     <a href="docs.html">Docs</a>
     <a href="about.html">About</a>
-    <a href="https://github.com/SmitroniX/SmiTriX" rel="noopener">GitHub</a>
-    <a href="https://gitlab.com/jogdandasmit/SmiTriX" rel="noopener">GitLab</a>
-    <a href="https://discord.gg/ZFQV5dza9P" rel="noopener">Discord</a>
-    <a href="index.html#download">Download</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="https://github.com/DuarteSantos8/openGym" rel="noopener">GitHub</a>
+    <a href="https://gitlab.com/DuarteSantos8/opengym" rel="noopener">GitLab mirror</a>
+    <a href="https://discord.gg/e62jY6fwVb" rel="noopener">Discord</a>
+    <a href="/#download">Download</a>
   </div>
 </div></footer>
 
-<button class="back-to-top" id="backToTop" aria-label="Scroll to top">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 19V5M5 12l7-7 7 7"/>
-  </svg>
-</button>
-
-<script src="site.js?v=21" defer></script>
+<script src="site.js?v=${assetVersion}" defer></script>
 <script>${js}</script>
 </body>
 </html>
 `
 
-fs.writeFileSync(outPath, html)
-console.log(`wrote ${path.relative(root, outPath)} — ${ops.length} endpoints, ${Object.keys(spec.components.schemas).length} schemas, ${(html.length / 1024).toFixed(1)} KB`)
+const rel = path.relative(root, outPath)
+const summary = `${ops.length} endpoints, ${Object.keys(spec.components.schemas).length} schemas, ${(html.length / 1024).toFixed(1)} KB`
+// --check is what build-coach-assets.mjs has had all along, for the same reason: the page is
+// generated and committed, so a spec change that forgets to regenerate it ships a reference
+// that describes the previous version of the API. It also catches the other direction: an
+// edit made to the page by hand, which the next regeneration would silently undo.
+if (check) {
+  let current = null
+  try { current = fs.readFileSync(outPath, 'utf8') } catch { /* missing counts as stale */ }
+  if (current !== html) {
+    console.error(`${rel} is out of date. Run: node scripts/build-api-docs.mjs`)
+    process.exit(1)
+  }
+  console.log(`${rel} in sync: ${summary}`)
+} else {
+  fs.writeFileSync(outPath, html)
+  console.log(`wrote ${rel}: ${summary}`)
+}
+

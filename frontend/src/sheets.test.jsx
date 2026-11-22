@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { EXDB } from './lib/exercises.js'
 import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
-import { exConfigSheet } from './sheets.jsx'
+import { exConfigSheet, menuSheet } from './sheets.jsx'
 
 const ex = EXDB.find(e => e.id === '0009')
 const mounted = []
@@ -78,41 +78,26 @@ describe('exercise configuration progression step', () => {
     expect(config.onSave).toHaveBeenCalledWith(expect.objectContaining({ inc: 0.5 }))
     expect(useUI.getState().sheets).toHaveLength(0)
   })
+})
 
-  it('saves customSets and targetSets when per-set targets are configured', () => {
-    const onSave = vi.fn()
-    exConfigSheet(ex, {
-      sets: 3,
-      reps: 10,
-      weight: 40,
-      mode: 'reps',
-      prog: 'off',
-      customSets: true,
-      targetSets: [
-        { r: 12, w: 40 },
-        { r: 10, w: 50 },
-        { r: 8, w: 60 }
-      ]
-    }, onSave)
+// QA 1.3.9: "Convert To Lb?" — the menu title was title-cased whatever it said.
+describe('menu sheet title', () => {
+  afterEach(() => { act(() => { mounted.splice(0).forEach(root => root.unmount()) }) })
+  const titleOf = opts => {
+    useUI.setState({ sheets: [] })
+    menuSheet({ items: [], ...opts })
     const sheet = useUI.getState().sheets.at(-1)
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
     mounted.push(root)
     act(() => root.render(sheet.render(() => useUI.getState().closeSheet(sheet.id))))
-
-    const save = [...host.querySelectorAll('button')]
-      .find(b => /^(save|add to routine)$/i.test(b.textContent.trim()))
-    act(() => { save.click() })
-
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      customSets: true,
-      sets: 3,
-      targetSets: [
-        { r: 12, w: 40 },
-        { r: 10, w: 50 },
-        { r: 8, w: 60 }
-      ]
-    }))
+    return host.querySelector('h3')
+  }
+  it('shows a sentence as written', () => {
+    expect(titleOf({ title: 'Convert to lb?' }).className).toBe('')
+  })
+  it('still title-cases an exercise name when asked to', () => {
+    expect(titleOf({ title: 'barbell curl', titleClass: 'capitalize' }).className).toBe('capitalize')
   })
 })

@@ -1,9 +1,14 @@
-# Publishes the local-first iPhone app at /demo; the root page redirects there.
-name: Deploy website to GitHub Pages
+# Publishes ProTraX as a local-first PWA at the repository Pages root for iPhone Safari and browsers.
+name: Deploy ProTraX to GitHub Pages
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'catalogue/**'
+      - 'scripts/catalogue/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -15,46 +20,30 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-env:
-  DATASET: https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Build local-first web app
+      - run: npm ci
         working-directory: frontend
-        run: |
-          npm ci --ignore-scripts
-          npm run build:iphone
+      - run: npm run build:iphone
+        working-directory: frontend
         env:
-          VITE_IPHONE_PWA: '1'
-          VITE_IMG_BASE: ${{ env.DATASET }}/images/
-          VITE_GIF_BASE: ${{ env.DATASET }}/videos/
-
-      - name: Stage the site with its /demo app
-        run: |
-          rm -rf website/demo
-          mkdir -p website/demo
-          cp -R frontend/dist-iphone/. website/demo/
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+          VITE_LOCAL_PWA: '1'
+      # The 180 px exercise media is licensed for this non-commercial openGym fork and served
+      # from the same origin, so the browser can cache media used in saved routines.
+      - run: node scripts/catalogue/stage-media.mjs frontend/dist-iphone
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: website
+          path: frontend/dist-iphone
 
   deploy:
     needs: build
@@ -64,5 +53,4 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
-
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

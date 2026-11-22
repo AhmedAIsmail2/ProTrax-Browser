@@ -1,116 +1,139 @@
 // @vitest-environment happy-dom
+// The tab bar is fixed on screen and re-renders on every store write — once a second for the
+// whole of a rest. Its buttons must survive that: a component declared inside the render body is
+// a new function each time, which React reads as a different type and rebuilds from scratch.
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TabBar from './TabBar.jsx'
-import { useStore, DEF } from '../store/useStore.js'
+import { DEF, useStore } from '../store/useStore.js'
+
+const where = vi.hoisted(() => ({ loc: { pathname: '/home' } }))
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => () => {},
+  useLocation: () => where.loc,
+}))
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-let container
-let root
+let host, root, originalS, originalUser
 
 beforeEach(() => {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-  useStore.setState({
-    user: { id: 'test_user', name: 'Test User' },
-    S: { ...DEF, active: null },
-    isGuest: () => false,
-  })
+  const store = useStore.getState()
+  originalS = store.S
+  originalUser = store.user
+  useStore.setState({ S: JSON.parse(JSON.stringify(DEF)), user: { id: 1, name: 'test' } })
+  host = document.createElement('div')
+  document.body.appendChild(host)
+  root = createRoot(host)
 })
 
 afterEach(() => {
   act(() => root.unmount())
-  container.remove()
+  host.remove()
+  useStore.setState({ S: originalS, user: originalUser })
+  where.loc = { pathname: '/home' }
 })
 
-describe('TabBar component', () => {
-  it('does not render when user is not authenticated and not guest', async () => {
-    useStore.setState({ user: null, isGuest: () => false })
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={['/home']}>
-          <TabBar onStart={() => {}} />
-        </MemoryRouter>
-      )
-    })
-    expect(container.querySelector('#tabbar')).toBeNull()
+const tabs = () => [...host.querySelectorAll('#tabbar button')]
+
+describe('the tab bar across a store write', () => {
+  it('keeps the very same buttons instead of rebuilding them every tick', () => {
+    act(() => { root.render(<TabBar onStart={() => {}} />) })
+    const before = tabs()
+    expect(before).toHaveLength(5)
+
+    // What a rest does once a second: S is replaced, so everything reading it re-renders.
+    act(() => { useStore.getState().update(s => { s.restSec = 91 }, false) })
+
+    const after = tabs()
+    expect(after).toHaveLength(before.length)
+    after.forEach((el, i) => expect(el).toBe(before[i]))
   })
 
-  it('highlights Home tab on /home, /settings, /checkin, and /admin', async () => {
-    const routes = ['/home', '/settings', '/checkin', '/admin']
-    for (const route of routes) {
-      await act(async () => {
-        root.render(
-          <MemoryRouter initialEntries={[route]}>
-            <TabBar onStart={() => {}} />
-          </MemoryRouter>
-        )
-      })
-      const buttons = container.querySelectorAll('#tabbar button')
-      const homeBtn = buttons[0] // first tab is Home
-      expect(homeBtn.classList.contains('on'), `Home tab should be on for ${route}`).toBe(true)
-    }
+  it('still lights the tab for the route it is on, and follows a change of state', () => {
+    act(() => { root.render(<TabBar onStart={() => {}} />) })
+    expect(tabs()[0].className).toBe('on')
+    expect(tabs()[1].className).toBe('')
+    expect(tabs()[2].className).toBe('start')
+
+    act(() => { useStore.getState().update(s => { s.active = { id: 'a', entries: [], cur: 0 } }, false) })
+    expect(tabs()[2].className).toBe('start rec')
+    expect(tabs()[0].className).toBe('on')
+  })
+})
+
+// Settings → "Show connection status" off (#369, #330): a stuck sync shows as a dot on Home, the
+// tab Settings opens from, and the tab's name says it.
+describe('the connection dot on Home', () => {
+  const home = () => tabs()[0]
+  it('is there for a sync problem only while the banner is switched off', () => {
+    const original = useStore.getState().sync
+    try {
+      useStore.setState({ sync: { status: 'error', lastError: { status: 502 }, pending: true } })
+      act(() => { root.render(<TabBar onStart={() => {}} />) })
+      expect(home().querySelector('.tab-dot')).toBeNull()
+      act(() => { useStore.getState().update(s => { s.connStatus = false }, false) })
+      expect(home().querySelector('.tab-dot')).not.toBeNull()
+      expect(home().getAttribute('aria-label')).toBe('Home, Connection problem')
+      act(() => { useStore.setState({ sync: { status: 'ok', lastError: null, pending: false } }) })
+      expect(home().querySelector('.tab-dot')).toBeNull()
+      expect(home().getAttribute('aria-label')).toBeNull()
+    } finally { useStore.setState({ sync: original }) }
+  })
+})
+
+// v1.3.11 icon sweep: one icon per concept. Every tab carries its name under the icon, Start is a
+// play button whether or not a session runs, and Exercises is the dumbbell (no more generic list).
+describe('the tab icons and labels', () => {
+  const icon = el => el.querySelector('svg')?.getAttribute('data-icon')
+  const label = el => el.querySelector('span:last-child').textContent
+  it('labels every tab and uses one icon per concept', () => {
+    act(() => { root.render(<TabBar onStart={() => {}} />) })
+    expect(tabs().map(icon)).toEqual(['house', 'calendar', 'play', 'chart', 'dumbbell'])
+    expect(tabs().map(label)).toEqual(['Home', 'Plan', 'Start', 'Stats', 'Exercises'])
+
+    act(() => { useStore.getState().update(s => { s.active = { id: 'a', entries: [], cur: 0 } }, false) })
+    expect(icon(tabs()[2])).toBe('play')
+    expect(label(tabs()[2])).toBe('Resume')
   })
 
-  it('highlights Stats tab on /stats and /history', async () => {
-    const routes = ['/stats', '/history']
-    for (const route of routes) {
-      await act(async () => {
-        root.render(
-          <MemoryRouter initialEntries={[route]}>
-            <TabBar onStart={() => {}} />
-          </MemoryRouter>
-        )
-      })
-      const buttons = container.querySelectorAll('#tabbar button')
-      const statsBtn = buttons[3] // 4th button (Home, Plan, Start, Stats, Library)
-      expect(statsBtn.classList.contains('on'), `Stats tab should be on for ${route}`).toBe(true)
-    }
+  it('shows a minimized session’s running time, still named Resume', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date(2026, 9, 5, 18, 0, 0))
+      act(() => { useStore.getState().update(s => { s.active = { id: 'a', entries: [], cur: 0, start: Date.now() - 754_000 } }, false) })
+      act(() => { root.render(<TabBar onStart={() => {}} />) })
+      const start = tabs()[2]
+      expect(label(start)).toBe('12:34')
+      expect(start.getAttribute('aria-label')).toBe('Resume')
+      act(() => { vi.advanceTimersByTime(2000) })
+      expect(label(start)).toBe('12:36')
+      expect(tabs()[2]).toBe(start)   // the same button, only its text ticks
+
+      // a past workout being edited has no clock running
+      act(() => { useStore.getState().update(s => { s.active.editingWorkoutId = 'w1' }, false) })
+      expect(label(tabs()[2])).toBe('Edit workout')
+    } finally { vi.useRealTimers() }
+  })
+})
+
+// A screen without a tab of its own keeps the tab it was opened from lit. Check-in, Progress photos
+// and Body measurements lit none: Measurements moved under Stats (75a3b750) and the bar never heard.
+describe('the tab a screen without its own lights', () => {
+  const lit = () => tabs().filter(b => b.classList.contains('on')).map(b => b.textContent)
+  it.each([
+    ['/history', 'Stats'], ['/structural-balance', 'Stats'], ['/progress-photos', 'Stats'], ['/measurements', 'Stats'],
+    ['/settings', 'Home'], ['/settings/units', 'Home'], ['/checkin', 'Home'], ['/muscles', 'Exercises'],
+  ])('%s lights %s', (pathname, tab) => {
+    where.loc = { pathname }
+    act(() => { root.render(<TabBar onStart={() => {}} />) })
+    expect(lit()).toEqual([tab])
   })
 
-  it('highlights Library tab on /library and /muscles', async () => {
-    const routes = ['/library', '/muscles']
-    for (const route of routes) {
-      await act(async () => {
-        root.render(
-          <MemoryRouter initialEntries={[route]}>
-            <TabBar onStart={() => {}} />
-          </MemoryRouter>
-        )
-      })
-      const buttons = container.querySelectorAll('#tabbar button')
-      const libBtn = buttons[4] // 5th button
-      expect(libBtn.classList.contains('on'), `Library tab should be on for ${route}`).toBe(true)
-    }
-  })
-
-  it('highlights Plan tab on /plan', async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={['/plan']}>
-          <TabBar onStart={() => {}} />
-        </MemoryRouter>
-      )
-    })
-    const buttons = container.querySelectorAll('#tabbar button')
-    const planBtn = buttons[1] // 2nd button
-    expect(planBtn.classList.contains('on')).toBe(true)
-  })
-
-  it('highlights Start button on /workout', async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={['/workout']}>
-          <TabBar onStart={() => {}} />
-        </MemoryRouter>
-      )
-    })
-    const buttons = container.querySelectorAll('#tabbar button')
-    const startBtn = buttons[2] // 3rd button
-    expect(startBtn.classList.contains('on')).toBe(true)
+  it('Muscles opened from Stats lights Stats, the way its back button goes', () => {
+    where.loc = { pathname: '/muscles', state: { from: '/stats' } }
+    act(() => { root.render(<TabBar onStart={() => {}} />) })
+    expect(lit()).toEqual(['Stats'])
   })
 })

@@ -1,12 +1,12 @@
 # Third-party notices
 
-SmiTriX — Copyright (C) 2026 Asmit Jogdand (SmitroniX).
-SmiTriX's own code is licensed under the **GNU AGPL v3.0** (see [LICENSE](LICENSE)).
+openGym — Copyright (C) 2026 Duarte Santos.
+openGym's own code is licensed under the **GNU AGPL v3.0** (see [LICENSE](LICENSE)).
 
 ## App store exception
 
 As an additional permission under section 7 of the AGPL v3.0, the copyright holder permits
-distribution of the SmiTriX mobile application through app store platforms (such as the
+distribution of the openGym mobile application through app store platforms (such as the
 Apple App Store and Google Play) whose terms of service would otherwise be incompatible
 with the AGPL, provided the corresponding source code remains available under the AGPL at
 the project repository. This permission applies to the distribution channel only and does
@@ -44,26 +44,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Exercise data & media
+## Exercise media (stills and animations)
 
-SmiTriX obtains both through
-[**hasaneyldrm/exercises-dataset**](https://github.com/hasaneyldrm/exercises-dataset), which
-licenses them differently. Neither is covered by SmiTriX's AGPL license.
+The exercise stills and animations in `catalogue/media/` (and inside the published container
+images and app packages) are licensed to openGym by Gym visual. **They are not covered by
+openGym's AGPL** and not by any licence of the exercise text below.
 
-That dataset is itself a redistribution: the content originates from
-[**ExerciseDB v1**](https://exercisedb.dev/) by **AscendAPI**. This is verifiable from SmiTriX's
-own data — the stored media filenames embed ExerciseDB's `exerciseId` (SmiTriX's `0001` is
-`0001-2gPfomN.jpg`; `2gPfomN` is ExerciseDB's id for "3/4 sit-up"), every metadata field matches,
-and the instruction sentences are identical apart from stripped `Step:N ` prefixes. See
-[issue #5](https://github.com/hasaneyldrm/exercises-dataset/issues/5) on that dataset.
+> © Aliaksandr Makatserchyk, Gym visual, gymvisual.com (reuse is governed by Gym visual's Terms & Conditions; obtain your own license there before reusing the media). NOTICE TO DEVELOPERS: The exercise animations included in this project are provided strictly for use within the openGym application. Third parties have no rights to reuse, extract, or integrate these media assets into independent apps, websites, or commercial products. To use these animations for your own software, you must obtain a license directly from gymvisual.com.
 
-### Metadata & instruction text
+What that means in practice:
 
-The exercise names, attributes and instructions (English in `frontend/src/lib/exercises-data.js`,
-other languages in `frontend/src/instr/`, regenerated via `scripts/build-instructions.mjs`)
-originate from ExerciseDB v1 and reach SmiTriX through the dataset above, which distributes them
-under the MIT license reproduced below. The translations into languages other than English are
-SmiTriX's own derivative work and are covered by SmiTriX's AGPL.
+- The repository, websites and self-hosted servers carry the media at 180×180 px at most. Larger
+  versions exist only inside the compiled openGym app packages.
+- There is no public API, CDN or downloadable media pack. Don't hotlink the files or copy them out
+  of this repository or a running instance.
+- A non-commercial fork of openGym may keep the unmodified 180 px media together with this notice.
+  A commercial fork, or any other use, needs its own licence from [gymvisual.com](https://gymvisual.com/).
+- The media may not be used to train, prompt or feed any AI system, or as a basis for generated
+  images, animations or video.
+
+## Exercise text (names, muscles, descriptions, instructions)
+
+The catalogue in `catalogue/` is openGym's own and is edited by its community (see
+`catalogue/README.md`). Entries marked `"textSource": "exercisedb"` (the 1,324 exercises openGym
+shipped before v1.4.0) keep names, muscles and instructions that originate from
+[**ExerciseDB v1**](https://exercisedb.dev/) by AscendAPI and reached openGym through
+[**hasaneyldrm/exercises-dataset**](https://github.com/hasaneyldrm/exercises-dataset), under the MIT
+licence reproduced below. Everything else in the catalogue (the newer exercises, every description,
+the muscle-map corrections and all translations) was written for openGym and is covered by
+openGym's AGPL.
 
 ```
 MIT License
@@ -89,52 +98,25 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### Images & animations — third-party, not MIT and not AGPL
-
-The exercise thumbnails (180×180) and animations are **not** covered by the MIT license above and
-**not** by SmiTriX's AGPL. Their ownership is currently **unresolved**, and SmiTriX states this
-plainly rather than guessing:
-
-- The upstream dataset attributes them to **© [Gym visual](https://gymvisual.com/)**, redistributed
-  there with that rights holder's written permission — a permission granted to *that dataset* and
-  **not transferable**.
-- **ExerciseDB/AscendAPI** describes itself as "the original creator and owner" of this content and
-  publishes its own [terms](https://exercisedb.io/faq), which permit self-hosting, bundling and
-  commercial display, while prohibiting redistribution of the raw dataset or media as a standalone
-  or competing content package.
-
-These two claims contradict each other. A clarification has been requested from AscendAPI; this
-notice will be updated once the provenance is settled.
-
-**Until then, treat the media as third-party content licensed to neither SmiTriX nor to you.**
-
-**SmiTriX does not redistribute it.** It is not in this repository, not in its history, and not in
-the published container images or the Android APK. A self-hosted instance downloads it from the
-upstream source on first `docker compose up`; the mobile and demo builds load it from a CDN at
-runtime.
-
-If you want to reuse the media — in SmiTriX or anywhere else, commercially or not — **clear it with
-the rights holder first**, and keep any attribution that accompanies it intact.
-
-Brazilian Portuguese exercise instructions under
-`scripts/instruction-sources/pt-BR.json` and exercise names under
-`scripts/exercise-name-sources/pt-BR.json` are original translations of that
+Brazilian Portuguese exercise instructions and names (now in `catalogue/i18n/pt-BR.json`) are original translations of that
 English source produced with OpenAI Codex and Anthropic Claude Code
 language-model assistance. They are not copied from a separate Portuguese
 dataset. Their review status and translation policy are documented alongside
 the source files.
 
-## Gym check-in QR codes
+## Gym check-in QR codes and barcodes
 
-The gym check-in feature (a saved membership code shown as a QR code on the phone, added by
-typing, importing a photo, or scanning with the camera) uses three third-party packages. All are
-permissively licensed and compatible with SmiTriX's AGPL, and all load on demand: the QR renderer
+The gym check-in feature (a saved membership code shown as a QR code or barcode on the phone,
+added by importing a photo or scanning with the camera) uses three third-party packages. All are
+permissively licensed and compatible with openGym's AGPL, and all load on demand: the QR renderer
 and the browser decoder only when a card is shown or scanned, the ML Kit plugin only in the
-Android/iOS app.
+Android/iOS app. Barcodes (Code 128, Code 39, EAN-13, EAN-8, UPC-A) are drawn, and read in
+browsers without a native `BarcodeDetector`, by openGym's own code (`frontend/src/lib/barcode.js`),
+under openGym's license.
 
-### QR/barcode rendering — `lean-qr`
+### QR rendering — `lean-qr`
 
-SmiTriX renders each saved code on the phone with [**lean-qr**](https://github.com/davidje13/lean-qr)
+openGym renders each saved code on the phone with [**lean-qr**](https://github.com/davidje13/lean-qr)
 by David Evans, used under the **MIT License** and reproduced below. Only the code's stored value
 is kept; the picture is generated fresh from that value each time it is shown, never stored.
 It runs the same way in the app and in the browser/PWA.
@@ -168,7 +150,8 @@ SOFTWARE.
 In a browser (including the installed PWA), reading a code from the camera or from an imported
 photo uses [**jsQR**](https://github.com/cozmo/jsQR) by Cosmo Wolfe, under the **Apache License
 2.0** (text at <https://www.apache.org/licenses/LICENSE-2.0> and in the package's own `LICENSE`).
-Where the browser has a native `BarcodeDetector`, that is tried first and jsQR is the fallback.
+Where the browser has a native `BarcodeDetector`, that is tried first and jsQR is the fallback
+(with openGym's own reader for barcodes).
 Video frames are decoded in memory and never uploaded or stored.
 
 ### Camera scan & photo decode in the app — `@capacitor-mlkit/barcode-scanning`
@@ -176,6 +159,6 @@ Video frames are decoded in memory and never uploaded or stored.
 In the Android/iOS app, reading a code — from the camera or from an imported photo — uses the
 [**@capacitor-mlkit/barcode-scanning**](https://github.com/capawesome-team/capacitor-mlkit) plugin
 by the Capawesome Team (Robin Genz), a Capacitor wrapper around Google's ML Kit, used under the
-**Apache License 2.0**. SmiTriX pins the `7.x` line to stay on Capacitor 7. The full license text is
+**Apache License 2.0**. openGym pins the `7.x` line to stay on Capacitor 7. The full license text is
 available at <https://www.apache.org/licenses/LICENSE-2.0> and in the package's own `LICENSE` file.
-The decoded string is what SmiTriX keeps; the photo itself is never stored.
+The decoded string is what openGym keeps; the photo itself is never stored.
