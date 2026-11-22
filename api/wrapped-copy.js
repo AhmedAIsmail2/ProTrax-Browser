@@ -82,4 +82,3 @@ export const WRAPPED_COPY = {
     "body": "訓練、紀錄，再加一個非常誠實的性格測驗。點一下看看你的一年。"
   }
 };
-
