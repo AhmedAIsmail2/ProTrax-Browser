@@ -5,15 +5,7 @@
 name: iOS
 
 on:
-  # Pull requests: when they touch the iOS shell or what goes into it, or when someone puts the
-  # `ios` label on one (a change elsewhere that might still matter on the phone).
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
-  push:
-    branches: [main, stores, watch]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/ios.yml'
+  # The shipped ProTraX product is the local-first PWA; native iOS builds are manual only.
   workflow_dispatch:
 
 permissions:

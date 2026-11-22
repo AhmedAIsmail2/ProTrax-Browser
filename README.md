@@ -29,7 +29,7 @@ The site serves the ProTraX web app itself. Workouts and settings are saved loca
 
 ## GitHub Pages deployment
 
-The `main` branch publishes the local-first PWA to `/demo/`; the root page forwards to it. The Pages workflow builds the browser app without seeded example workouts, then stages the included 180 px exercise media next to the web app. On iPhone, Safari's **Add to Home Screen** opens this same deployed build.
+The `main` branch publishes the local-first PWA at the repository's GitHub Pages root (`https://ahmedaismail2.github.io/ProTrax-Browser/`). The Pages workflow builds the browser app without seeded example workouts, then stages the included 180 px exercise media next to the web app. On iPhone, Safari's **Add to Home Screen** opens this same deployed build.
 
 For a local web build from PowerShell:
 

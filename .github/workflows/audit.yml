@@ -12,15 +12,9 @@
 name: Weekly audit
 
 on:
-  schedule:
-    - cron: '23 4 * * 1'   # Mondays 04:23 UTC
+  # The upstream server/native audit is not the validation path for this PWA fork.
+  # Keep it available for an intentional manual run.
   workflow_dispatch:
-  # A change to the audit itself is tried out before it waits a week for its first run.
-  pull_request:
-    paths: ['.github/workflows/audit.yml', 'scripts/ci/deps-audit.mjs']
-  push:
-    branches: ['ci-*']
-    paths: ['.github/workflows/audit.yml', 'scripts/ci/deps-audit.mjs']
 
 permissions:
   contents: read

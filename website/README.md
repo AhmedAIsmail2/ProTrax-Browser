@@ -1,7 +1,8 @@
-# ProTraX on GitHub Pages
+# Website assets
 
-The root `index.html` forwards visitors to `/demo/`, where the local-first ProTraX PWA is
-published. iPhone users open that URL in Safari and can add it to their Home Screen.
+The deployed GitHub Pages artifact is built from `../frontend/dist-iphone` and serves the
+local-first PWA from the repository Pages root. This source `website/` folder is not copied into
+that deployment. The app URL is `https://ahmedaismail2.github.io/ProTrax-Browser/`.
 
 Not in this folder (added at deploy time):
 
@@ -13,10 +14,8 @@ Not in this folder (added at deploy time):
 - `app-store-badge.svg`: Apple's official "Download on the App Store" badge, shown once the
   download card's `data-appstore` says `live`. The APKs themselves are not here any more: the
   download buttons point at the GitHub release (`releases/latest/download/<name>`)
-- `demo/` — the local-first PWA built from `../frontend` with `VITE_LOCAL_PWA=1`. It stores
-  each person's workouts and settings in that browser on that device. The 180 px exercise media
-  is staged from `../catalogue/media` by `../scripts/catalogue/stage-media.mjs`; see the Pages
-  workflow at `../.github/workflows/pages.yml`.
+- The local-first PWA and its 180 px exercise media are built and staged by the Pages workflow at
+  `../.github/workflows/pages.yml`.
 
 Every page has the same top bar. Pages with a table of contents (home, docs, about, API)
 also have a contents drawer (`.side`), opened by the green **Contents** pill in the

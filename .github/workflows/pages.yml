@@ -1,4 +1,4 @@
-# Publishes ProTraX as a local-first PWA at /demo for iPhone Safari and desktop browsers.
+# Publishes ProTraX as a local-first PWA at the repository Pages root for iPhone Safari and browsers.
 name: Deploy ProTraX to GitHub Pages
 
 on:
