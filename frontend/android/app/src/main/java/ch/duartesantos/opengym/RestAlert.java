@@ -42,7 +42,7 @@ public final class RestAlert {
     static final String ACTION_HOLD = "ch.duartesantos.opengym.rest.HOLD";
     static final String CHANNEL_ID = "rest-over";
     /**
-     * Settings â†’ Vibrate off. Android keeps a channel's vibration as it was when the channel was
+     * Settings → Vibrate off. Android keeps a channel's vibration as it was when the channel was
      * created (after that it is the user's, in the system settings), so "rest-over" buzzes for
      * good and an end that must not buzz goes out on this channel, which never vibrates.
      */
@@ -76,7 +76,7 @@ public final class RestAlert {
     private RestAlert() {}
 
     /**
-     * `alarmBuzz` is Settings â†’ "Vibrate when the phone is on silent" (#375): the end buzzes as an
+     * `alarmBuzz` is Settings → "Vibrate when the phone is on silent" (#375): the end buzzes as an
      * alarm, which silent mode lets through, and the notification goes out on the quiet channel so
      * a phone with its ringer on does not buzz twice.
      */
@@ -273,10 +273,10 @@ public final class RestAlert {
             // On silent the channel's buzz is muted; an alarm's is not (#375). The notification
             // went out on the quiet channel, so this is the one buzz with the ringer on too.
             if (alarmBuzz) buzz(ctx, VIBRATE);
-            // Settings â†’ Vibrate off is off here too: without notifications this buzz is the alert.
+            // Settings → Vibrate off is off here too: without notifications this buzz is the alert.
             else if (!shown && vibrate) vibrateFallback(ctx);
             // Locked or in the background, the page does not play its chime, so this is the one:
-            // the same sound as Settings â†’ Sound picks for the page (RestTone.render).
+            // the same sound as Settings → Sound picks for the page (RestTone.render).
             boolean play = intent.getBooleanExtra("sound", true);
             if (play) playSound(ctx, toneOf(intent));
             // A chain of holds that run themselves goes on with the page asleep: its next alert.
@@ -328,7 +328,7 @@ public final class RestAlert {
     @SuppressWarnings("deprecation")
     private static boolean showNotification(Context ctx, Intent intent, boolean alarmBuzz) {
         String title = intent.getStringExtra("title");
-        if (title == null || title.isEmpty()) title = "Restâ€™s over. Next set!";
+        if (title == null || title.isEmpty()) title = "Rest’s over. Next set!";
         // With the alarm buzz on, the notification itself stays still: the buzz comes from buzz().
         boolean vibrate = intent.getBooleanExtra("vibrate", true) && !alarmBuzz;
         String channelId = channelFor(intent.getStringExtra("channelId"), vibrate);
@@ -423,7 +423,7 @@ public final class RestAlert {
     /**
      * A buzz silent mode lets through (#375): vibration with the alarm usage, which the system
      * plays in silent and vibrate-only modes like the clock app's alarm. `pattern` is Android's
-     * waveform (off, on, off, onâ€¦). Do Not Disturb still decides, as it does for alarms.
+     * waveform (off, on, off, on…). Do Not Disturb still decides, as it does for alarms.
      */
     @SuppressWarnings("deprecation")
     static void buzz(Context ctx, long[] pattern) {

@@ -116,14 +116,14 @@ public class ProTraXWidgetProvider extends AppWidgetProvider {
         int tint = c.icon == WidgetContent.Icon.FLAME ? context.getColor(R.color.widget_flame) : accent;
         v.setInt(icon, "setColorFilter", tint);
         String val = c.value;
-        // Freezes as snowflakes beside the streak (â„ in text style, not the emoji).
+        // Freezes as snowflakes beside the streak (❄ in text style, not the emoji).
         if (c.freezes > 0) {
             StringBuilder b = new StringBuilder(val).append(' ');
             for (int i = 0; i < Math.min(2, c.freezes); i++) b.append(" \u2744\uFE0E");
             val = b.toString();
         }
         v.setTextViewText(value, val);
-        v.setTextViewText(caption, row && !c.title.isEmpty() ? c.title + (c.caption.isEmpty() ? "" : " Â· " + c.caption) : c.caption);
+        v.setTextViewText(caption, row && !c.title.isEmpty() ? c.title + (c.caption.isEmpty() ? "" : " · " + c.caption) : c.caption);
         v.setViewVisibility(caption, row && c.title.isEmpty() && c.caption.isEmpty() ? View.GONE : View.VISIBLE);
         v.setContentDescription(value, c.title + ": " + c.value + ". " + c.caption);
         if (!row) {
@@ -150,7 +150,7 @@ public class ProTraXWidgetProvider extends AppWidgetProvider {
         }
     }
 
-    /** The app's accent (Settings â†’ Look & Home), or its green when the snapshot has none. */
+    /** The app's accent (Settings → Look & Home), or its green when the snapshot has none. */
     static int accentOf(JSONObject snap) {
         try {
             String hex = snap == null ? null : snap.optString("accent", null);

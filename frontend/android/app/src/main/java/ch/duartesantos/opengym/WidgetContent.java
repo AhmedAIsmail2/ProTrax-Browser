@@ -75,7 +75,7 @@ final class WidgetContent {
             case "weight": {
                 JSONObject w = snap.optJSONObject("weight");
                 String title = label(labels, "weightGoal", "Weight goal");
-                if (w == null) return new WidgetContent(kind, Icon.SCALE, title, "â€“", label(labels, "noWeighIn", "No weigh-ins yet"), "protrax://weigh-in", null, 0);
+                if (w == null) return new WidgetContent(kind, Icon.SCALE, title, "–", label(labels, "noWeighIn", "No weigh-ins yet"), "protrax://weigh-in", null, 0);
                 JSONArray tr = w.optJSONArray("trend");
                 double[] trend = new double[tr == null ? 0 : tr.length()];
                 for (int i = 0; i < trend.length; i++) trend[i] = tr.optDouble(i, Double.NaN);
@@ -106,7 +106,7 @@ final class WidgetContent {
                 String caption = r == null ? null : str(r, "monthLine");
                 if (last != null) {
                     String name = str(last, "name"), v = str(last, "value");
-                    String line = name == null ? null : (v == null ? name : name + " Â· " + v);
+                    String line = name == null ? null : (v == null ? name : name + " · " + v);
                     if (line != null) caption = line;
                 }
                 String value = r == null ? "0" : String.valueOf(r.optInt("month", 0));
@@ -119,7 +119,7 @@ final class WidgetContent {
             case "challenges": {
                 // The month's challenges (lib/widgets.js challengesOfWidget): "2 / 3" and the first one still open.
                 JSONObject c = snap.optJSONObject("challenges");
-                String value = c == null ? "â€“" : c.optInt("done", 0) + " / " + c.optInt("total", 0);
+                String value = c == null ? "–" : c.optInt("done", 0) + " / " + c.optInt("total", 0);
                 String caption = c == null ? null : (str(c, "next") != null ? str(c, "next") : str(c, "line"));
                 return new WidgetContent(kind, Icon.MEDAL, label(labels, "challenges", "Challenges"), value, caption, "protrax://home", null, 0);
             }

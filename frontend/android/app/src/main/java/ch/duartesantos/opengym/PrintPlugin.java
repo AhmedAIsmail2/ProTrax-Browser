@@ -15,19 +15,19 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * Minimal local Capacitor plugin that hands a self-contained HTML document to the Android
  * system print flow (Save as PDF, Save to Drive, a real printer). Android WebView has no
  * window.print(), so the printable plan page (lib/plan-share.js planPrintHTML) can only reach
- * a PDF this way. No PDF library is bundled â€” the OS renders it.
+ * a PDF this way. No PDF library is bundled — the OS renders it.
  *
  * Usage from JS:
  *   import { registerPlugin } from '@capacitor/core';
  *   const Print = registerPlugin('Print');
- *   await Print.printHtml({ html: '<!doctype html>â€¦', name: 'Weekly Training Plan' });
+ *   await Print.printHtml({ html: '<!doctype html>…', name: 'Weekly Training Plan' });
  */
 @CapacitorPlugin(name = "Print")
 public class PrintPlugin extends Plugin {
 
     // The print framework drives an off-screen WebView asynchronously; without a strong
     // reference it can be collected mid-spool and the job dies silently. Held until the next
-    // print replaces it â€” one at a time is all the UI can start.
+    // print replaces it — one at a time is all the UI can start.
     private WebView printView;
 
     @PluginMethod
