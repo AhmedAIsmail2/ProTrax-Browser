@@ -1,6 +1,6 @@
 // Mobile build only: "connect to my server" mode (see mobile.js's header comment for why the
 // mobile flavor has no backend at all by default). This is the alternative — pairing the app to
-// an already self-hosted SmiTriX server instead of keeping data device-local.
+// an already self-hosted ProTraX server instead of keeping data device-local.
 //
 // Passkeys can't be used from inside the app's own WebView (its origin never matches the
 // server's RP_ID), so auth here is a short one-time code redeemed from an already signed-in
@@ -8,6 +8,7 @@
 // /api/pair/create + /api/pair/redeem.
 import { pairRedeem, setRemoteAuth } from './api.js'
 import { loadRemoteFile, saveRemoteFile } from './mobile.js'
+import { clearCfAccess } from './cf-access.js'
 
 // Accepts what someone actually types: bare host, no scheme, trailing slash, stray whitespace.
 // Defaults to https:// (self-hosting docs already push for HTTPS; the one exception, localhost,
@@ -19,7 +20,7 @@ export function normalizeServerUrl(raw) {
   try {
     const u = new URL(withScheme)
     if (!u.hostname) return null
-    return u.origin
+    return u.origin + u.pathname.replace(/\/+$/, '')
   } catch (e) { return null }
 }
 
@@ -31,9 +32,20 @@ export async function chooseLocal() {
   await saveRemoteFile({ mode: 'local' })
 }
 
+// The server's Cloudflare Access token goes with it (lib/cf-access.js).
 export async function forgetRemote() {
   await saveRemoteFile({ mode: 'local' })
   setRemoteAuth('', null)
+  await clearCfAccess()
+}
+
+// The server renewed the token (GET /api/me hands one out once the old is past half its life):
+// every request from now on carries it, and the pairing file keeps it for the next start. The
+// old one stays valid until its own expiry, so a write that fails here costs nothing but a
+// renewal on a later start.
+export async function renewToken(remote, token) {
+  setRemoteAuth(remote.base, token)
+  await saveRemoteFile({ ...remote, token })
 }
 
 // Redeems the pairing code, wires api.js at the resolved base, and persists the connection so

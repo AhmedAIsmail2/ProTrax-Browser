@@ -2,6 +2,10 @@
 <resources>
     <string name="app_name">ProTraX</string>
     <string name="title_activity_main">ProTraX</string>
-    <string name="package_name">com.smitrix.app</string>
-    <string name="custom_url_scheme">com.smitrix.app</string>
+    <string name="package_name">com.protrax.ahmed</string>
+    <string name="custom_url_scheme">protrax</string>
+    <string name="rest_countdown_channel_name">Rest countdown</string>
+    <string name="rest_channel_name">Rest timer</string>
+    <string name="rest_quiet_channel_name">Rest timer, without vibration</string>
+    <string name="rest_channel_desc">Rest between sets, in the notification shade. The lock screen shows it only when notifications are allowed there.</string>
 </resources>

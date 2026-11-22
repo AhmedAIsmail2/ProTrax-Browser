@@ -9,6 +9,7 @@
 // Only these three constants are shared with normal builds: Vite replaces VITE_DEMO at build
 // time, so the demo-only UI folds away and the seed generator — imported dynamically — never
 // lands in a self-hosted bundle.
-export const DEMO = import.meta.env.VITE_DEMO === '1'
+export const LOCAL_PWA = import.meta.env.VITE_LOCAL_PWA === '1'
+export const DEMO = import.meta.env.VITE_DEMO === '1' || LOCAL_PWA
 export const DEMO_SEEDED = 'gym_demo_seeded_v1'
-export const REPO = 'https://github.com/SmitroniX/SmiTriX'
+export const REPO = 'https://github.com/AhmedAIsmail2/ProTrax-Browser'

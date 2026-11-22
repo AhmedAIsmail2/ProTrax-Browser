@@ -1,18 +1,19 @@
-# SmiTriX — GitLab CI/CD
+# openGym — GitLab CI/CD
 #
-# This is the pipeline that actually gates and ships the project. It replaces the
-# GitHub Actions workflows (.github/, dormant since the account suspension) and the
-# gitea.com ones (.gitea/, kept only so the mirror stays buildable).
+# GitHub is openGym's home and its Actions (.github/) test and publish it; GitLab is a mirror
+# (.github/workflows/mirror.yml), and this pipeline keeps it building and tested.
 #
 # What it does, in order:
-#   test        — frontend, MCP and account API suites on every branch, MR and tag, each with a
+#   test        — frontend, MCP and api (Coach) suites on every branch, MR and tag, each with a
 #                 JUnit report (failures show up in the MR widget) and coverage; the frontend
 #                 job also measures the bundle and compares it with main's.
 #                 On a v* tag: release:preflight checks tag, package versions and CHANGELOG
 #                 before anything expensive starts.
-#   build       — the two container images → registry.gitlab.com/jogdandasmit/smitrix/{api,web},
-#                 and smoke checks that they build and serve
-#   package     — the signed Android APK → job artifact + generic package registry
+#   build       — the two container images → registry.gitlab.com/duartesantos8/opengym/{api,web},
+#                 and a run of both api targets that proves what each one does and does not carry
+#   package     — the signed Android APK → job artifact + generic package registry, on every
+#                 main push and every tag; the unsigned iOS archive the same way, once a Mac
+#                 runner is registered (build:ios, see there)
 #   verify      — the images that were just pushed, started together through docker-compose.yml
 #                 and asked to serve; plus a Trivy scan and an SBOM per image
 #   deploy      — the browser-only demo → GitLab Pages
@@ -44,15 +45,11 @@ stages:
   - maintenance
 
 variables:
-  # node:22-alpine in web/Dockerfile and api/Dockerfile — CI must match production.
-  NODE_IMAGE: "node:22-alpine"
+  # node:22.23.4-alpine in web/Dockerfile and api/Dockerfile — CI must match production.
+  NODE_IMAGE: "node:22.23.4-alpine"
   DOCKER_IMAGE: "docker:28-cli"
   DOCKER_DIND_IMAGE: "docker:28-dind"
   TRIVY_IMAGE: "aquasec/trivy:0.74.0"
-  # The demo build has no backend and no local media: the exercise images/GIFs (~140 MB)
-  # are never committed, so it points at the upstream dataset on jsDelivr, pinned to a
-  # commit so the CDN can cache it forever.
-  DATASET: "https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd"
   GIT_DEPTH: "50"
   # npm's own progress bars and funding notices are noise in a job log.
   npm_config_fund: "false"
@@ -156,10 +153,10 @@ test:frontend:
       - frontend/.npm
   script:
     - cd frontend
-    # --ignore-scripts: nothing here needs a postinstall, and the one package that has a
-    # heavy one (@capacitor/assets → sharp, a 10 MB libvips download from GitHub) is only
-    # used to draw app icons. That download timing out is what turned a release red.
-    - npm ci --cache .npm --prefer-offline --ignore-scripts --legacy-peer-deps
+    # --ignore-scripts: nothing here needs a postinstall. (@capacitor/assets, whose sharp
+    # downloaded libvips from GitHub and once turned a release red, is no longer installed:
+    # docs/MOBILE.md runs it with npx when icons are redrawn.)
+    - npm ci --cache .npm --prefer-offline --ignore-scripts
     # JUnit → the MR widget lists exactly which tests failed; cobertura → coverage on the
     # diff; text-summary → the number the coverage badge shows.
     - npx vitest run
@@ -205,9 +202,13 @@ test:mcp:
     key:
       files:
         - mcp/package-lock.json
+        - api/package-lock.json
     paths:
       - mcp/.npm
   script:
+    # log_workout's end-to-end test drives the real api/server.js: the api's dependencies too
+    # (as test:api installs them), or that test fails here rather than skipping.
+    - (cd api && npm ci --cache ../mcp/.npm --prefer-offline --omit=optional)
     - cd mcp
     - npm ci --cache .npm --prefer-offline --ignore-scripts
     - npx vitest run
@@ -242,12 +243,25 @@ test:api:
   script:
     - cd api
     - npm ci --cache .npm --prefer-offline --omit=optional
+    # The Coach tests run on node:test and drive the in-repo fixture provider plus a local mock
+    # of the Chat Completions shape, so the whole job works without an AI account or the network.
+    # Same suite `npm test` runs, plus the JUnit file and node's own coverage table.
     - node --experimental-test-coverage --test
         --test-reporter=spec --test-reporter-destination=stdout
         --test-reporter=junit --test-reporter-destination=junit.xml
-        push-messages.test.js
+        test/*.test.js
     - cd ..
-    - node --check api/server.js
+    # The api's copy of the exercise catalogue and the prompt module are generated and committed.
+    # A dataset or prompt change that forgets to regenerate them would otherwise only surface as
+    # "the Coach can't find that exercise" — or a prompt edit that never reached the model.
+    - node scripts/build-coach-assets.mjs --check
+    # website/api.html is generated from api/openapi.yaml and committed. Same reason: a spec
+    # change that forgets to regenerate it publishes a reference for the previous version.
+    - npm ci
+    - node scripts/build-api-docs.mjs --check
+    # api/coach/core is imported by the server under bare node AND by the phone under Vite.
+    # vitest forgives what node does not (?raw, import.meta.glob); this runs outside vitest.
+    - node api/scripts/check-core-loadable.mjs
   coverage: '/all files\s*\|\s*(\d+\.?\d*)/'
   artifacts:
     when: always
@@ -259,7 +273,7 @@ test:api:
 
 # --------------------------------------------------------------------------- images
 
-# Images land at registry.gitlab.com/jogdandasmit/smitrix/{api,web} and are what
+# Images land at registry.gitlab.com/duartesantos8/opengym/{api,web} and are what
 # `docker compose pull` fetches.
 #
 # On a v* tag: linux/amd64 + linux/arm64, tagged X.Y.Z, X.Y and latest.
@@ -327,7 +341,7 @@ build:images:
         PLATFORMS="linux/amd64"
         TAGS="-t $REPO:edge -t $REPO:$VERSION"
       fi
-      docker buildx create --use --name smitrix --driver docker-container tls-environment
+      docker buildx create --use --name opengym --driver docker-container tls-environment
       # shellcheck disable=SC2086
       docker buildx build \
         --platform "$PLATFORMS" \
@@ -366,24 +380,79 @@ build:images:
       when: manual
       allow_failure: true
 
-# Build and start the account API image, then verify its configuration endpoint.
+# Builds *and runs* both api targets. Building alone would not have caught the api image
+# shipping without coach/ — that image built perfectly and exited on boot. So each target has to
+# answer for itself: the untargeted build (which is what build:images publishes, since it names
+# no --target) boots, serves, carries no AI runtime and still constructs the HTTPS providers;
+# the coach one additionally resolves the Agent SDK's per-platform runtime (musl on this base),
+# which is the one thing that cannot be checked from the source tree. amd64 only, never pushed.
 build:api-check:
   extends: .docker
   stage: build
   needs: ["test:api"]
   script:
-    - docker build -t smitrix-api:published ./api
+    - docker build --target default -t opengym-api:default ./api
+    - docker build --target coach   -t opengym-api:coach   ./api
+    # No --target, exactly like build:images. What it ships is whatever Dockerfile stage happens
+    # to be last, and that untargeted artifact is the image every self-hoster pulls as :latest.
+    - docker build -t opengym-api:published ./api
+    # --- the published image has no AI runtime, and does not need one for the HTTPS providers
+    - |
+      set -eu
+      docker run --rm opengym-api:published node -e \
+        'import("@anthropic-ai/claude-agent-sdk").then(()=>{console.error("AI runtime present in the published image -- the last Dockerfile stage is no longer the runtime-free one");process.exit(1)},()=>process.exit(0))'
+      ! docker run --rm opengym-api:published codex --version 2>/dev/null
+      ! docker run --rm opengym-api:published bwrap --version 2>/dev/null
+      # npm is stripped from the published image (see api/Dockerfile) — its bundled tree was
+      # the only source of scanner findings, and nothing at runtime needs it.
+      ! docker run --rm opengym-api:published npm --version 2>/dev/null
+      ! docker run --rm opengym-api:published test -d /usr/local/lib/node_modules/npm
+      docker run --rm opengym-api:published node --input-type=module -e '
+        const { adapterFor } = await import("./coach/adapters/index.js");
+        for (const id of ["anthropic", "openai", "gemini", "compatible"]) {
+          const a = adapterFor(id);
+          if (!a || a.spawns !== false || typeof a.invoke !== "function") { console.error(id + " is not a usable HTTPS adapter in the published image"); process.exit(1); }
+        }
+        const r = await adapterFor("anthropic").check({}, {});
+        if (!r.ok || !r.needsKey) { console.error("anthropic.check() without a key should report a ready runtime that needs a key: " + JSON.stringify(r)); process.exit(1); }
+        console.log("HTTPS providers constructible on the published image");
+      '
+    # --- the default image boots and serves
     - |
       set -eu
       docker network create api-net
-      docker run -d --name api-check --network api-net -e DATA_DIR=/data smitrix-api:published
+      docker run -d --name api-default --network api-net -e DATA_DIR=/data opengym-api:default
       for i in $(seq 1 30); do
-        docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-check:3000/api/config >/dev/null 2>&1 && break
+        docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-default:3000/api/config >/dev/null 2>&1 && break
         sleep 1
       done
-      docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-check:3000/api/config | tee /dev/stderr | grep -q '"invite_only"'
-      docker rm -f api-check
+      docker run --rm --network api-net curlimages/curl:8.12.1 -fsS http://api-default:3000/api/config | tee /dev/stderr | grep -q '"invite_only"'
+      docker run --rm opengym-api:default node -e \
+        'import("@anthropic-ai/claude-agent-sdk").then(()=>{console.error("AI runtime present in the default image");process.exit(1)},()=>process.exit(0))'
+      docker rm -f api-default
       docker network rm api-net
+    # --- the coach image carries a runnable Agent SDK, Codex and its sandbox
+    - |
+      set -eu
+      docker run --rm opengym-api:coach node --input-type=module -e '
+        const { adapterFor } = await import("./coach/adapters/index.js");
+        const r = await adapterFor("claude").check();
+        if (!r.ok) { console.error(r.error); process.exit(1); }
+        console.log(r.version);
+      '
+      docker run --rm opengym-api:coach codex --version
+      docker run --rm opengym-api:coach bwrap --version
+      # Owned by the user jobs drop to, and 0700 — a credential cache readable by anything else
+      # in the container would undo the point of dropping privileges at all.
+      test "$(docker run --rm opengym-api:coach stat -c '%U %a' /coach-auth)" = "coach 700"
+    # --- neither Codex nor its sandbox is in the default image; the privilege drop can be performed
+    - |
+      set -eu
+      ! docker run --rm opengym-api:default codex --version 2>/dev/null
+      ! docker run --rm opengym-api:default bwrap --version 2>/dev/null
+      # canDropPrivileges() fails closed for the runtime-backed providers, so a missing `coach`
+      # user disables every one of their jobs — including the fixture. Cheaper to assert here.
+      docker run --rm opengym-api:default id coach
   rules:
     - !reference [.rules, not_on_schedule]
     - *release_tag
@@ -397,21 +466,26 @@ build:api-check:
       when: manual
       allow_failure: true
 
-# The web image is built from the repository root. Build and verify its app shell here without
-# relying only on the static Pages artifact. Built here, never pushed.
+# The web image is built from the repository root, and the frontend imports the Coach core from
+# api/coach/core — a path the Dockerfile has to copy by hand. Nothing in test:frontend or the
+# Pages build goes through that Dockerfile, so an MR could pass everything and still ship an
+# image that does not build (v1.2.15 did). Built here, never pushed.
 build:web-check:
   extends: .docker
   stage: build
   needs: ["test:frontend"]
   script:
-    - docker build -f web/Dockerfile -t smitrix-web:check .
-    # It serves the app shell.
+    - docker build -f web/Dockerfile -t opengym-web:check .
+    # It serves the app shell, and the shell is this build (the Coach setup is in the bundle).
+    # The master is uid 101, on port 80 — not the base image's EXPOSE 8080.
     - |
       set -eu
-      docker run -d --name web-check -e BACKEND=127.0.0.1 -e PORT=3000 smitrix-web:check
+      docker run -d --name web-check -e BACKEND=127.0.0.1 -e PORT=3000 opengym-web:check
       sleep 2
+      [ "$(docker exec web-check id -u)" = 101 ]
+      docker exec web-check grep -q '^Uid:[[:space:]]*101[[:space:]]' /proc/1/status
       docker exec web-check wget -qO- http://127.0.0.1/ | grep -q '<div id="root">'
-      docker exec web-check sh -c 'grep -l "ProTraX" /usr/share/nginx/html/assets/index-*.js >/dev/null'
+      docker exec web-check sh -c 'grep -l "coach" /usr/share/nginx/html/assets/index-*.js >/dev/null'
       docker rm -f web-check
   rules:
     - !reference [.rules, not_on_schedule]
@@ -422,6 +496,7 @@ build:web-check:
         paths:
           - "frontend/**/*"
           - "web/**/*"
+          - "api/coach/core/**/*"
           - ".gitlab-ci.yml"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
@@ -431,12 +506,13 @@ build:web-check:
 
 # The official signed APK. Signing keys live in protected CI variables, so they only
 # exist on protected refs (main and v* tags) — a fork's MR builds an unsigned APK and
-# cannot get at the key. Sideload-only by design: SmiTriX is on no app store.
+# cannot get at the key. This is the sideloaded APK; the store builds are made on the release
+# machine (docs/APP_STORES.md).
 #
 # Needs three CI/CD variables (Settings → CI/CD → Variables), all *protected*:
-#   ANDROID_KEYSTORE_B64       file    base64 of smitrix-release.keystore
+#   ANDROID_KEYSTORE_B64       file    base64 of opengym-release.keystore
 #   ANDROID_KEYSTORE_PASSWORD  masked  the keystore password
-#   ANDROID_KEY_ALIAS          plain   smitrix
+#   ANDROID_KEY_ALIAS          plain   opengym
 # KEEP THAT KEYSTORE: updates must be signed with the same key or Android refuses to
 # install them over an existing copy.
 build:apk:
@@ -459,14 +535,17 @@ build:apk:
     - |
       set -eu
       cd frontend
-      npm ci --legacy-peer-deps
+      npm ci
       # VITE_MOBILE build + `cap sync` into android/. The mobile flavor talks to no
-      # backend at all: no sign-in, no sync, media straight from the CDN.
+      # backend at all: no sign-in, no sync. The 180 px exercise media from catalogue/media are
+      # packed into the app; a release built locally sets APP_MEDIA_DIR for larger ones.
       npm run build:mobile
       VER="$(node -p "require('./package.json').version")"
       cd android
-      ./gradlew --no-daemon assembleRelease
-      UNSIGNED=app/build/outputs/apk/release/app-release-unsigned.apk
+      # The sideload flavour: the APK that updates itself (the play flavour is the Google Play
+      # build, built and signed on the release machine as an .aab, docs/APP_STORES.md).
+      ./gradlew --no-daemon assembleSideloadRelease
+      UNSIGNED=app/build/outputs/apk/sideload/release/app-sideload-release-unsigned.apk
       BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
       if [ -n "${ANDROID_KEYSTORE_B64:-}" ]; then
         base64 -d "$ANDROID_KEYSTORE_B64" > "$CI_PROJECT_DIR/.ks.jks"
@@ -476,9 +555,9 @@ build:apk:
           --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
           --ks-key-alias "$ANDROID_KEY_ALIAS" \
           --key-pass "env:ANDROID_KEYSTORE_PASSWORD" \
-          --out "$CI_PROJECT_DIR/SmiTriX-$VER.apk" aligned.apk
+          --out "$CI_PROJECT_DIR/openGym-$VER.apk" aligned.apk
         rm -f "$CI_PROJECT_DIR/.ks.jks"
-        "$BT/apksigner" verify --print-certs "$CI_PROJECT_DIR/SmiTriX-$VER.apk"
+        "$BT/apksigner" verify --print-certs "$CI_PROJECT_DIR/openGym-$VER.apk"
       elif [ -n "${CI_COMMIT_TAG:-}" ]; then
         # A release must never quietly ship an APK nobody can install. If the key is missing
         # on a tag, something is wrong with the protected variables — say so and stop.
@@ -487,7 +566,7 @@ build:apk:
         exit 1
       else
         echo "No signing key on this ref — producing an UNSIGNED apk (cannot be installed)."
-        "$BT/zipalign" -f -p 4 "$UNSIGNED" "$CI_PROJECT_DIR/SmiTriX-$VER-unsigned.apk"
+        "$BT/zipalign" -f -p 4 "$UNSIGNED" "$CI_PROJECT_DIR/openGym-$VER-unsigned.apk"
       fi
       echo "APK_VERSION=$VER" >> "$CI_PROJECT_DIR/apk.env"
     # On a release tag the APK also goes into the generic package registry, which is
@@ -499,33 +578,103 @@ build:apk:
       # Sideloading means nobody's app store checked this file for you, so publish the
       # digest next to it rather than leaving people to trust the download. Written for
       # every build (branch artifacts too), uploaded only from a release tag.
-      for apk in SmiTriX-*.apk; do sha256sum "$apk" > "$apk.sha256"; cat "$apk.sha256"; done
-      if [ -n "${CI_COMMIT_TAG:-}" ] && [ -f "SmiTriX-$APK_VERSION.apk" ]; then
-        echo "APK_SHA256=$(cut -d' ' -f1 "SmiTriX-$APK_VERSION.apk.sha256")" >> apk.env
-        for f in "SmiTriX-$APK_VERSION.apk" "SmiTriX-$APK_VERSION.apk.sha256"; do
+      for apk in openGym-*.apk; do sha256sum "$apk" > "$apk.sha256"; cat "$apk.sha256"; done
+      if [ -n "${CI_COMMIT_TAG:-}" ] && [ -f "openGym-$APK_VERSION.apk" ]; then
+        echo "APK_SHA256=$(cut -d' ' -f1 "openGym-$APK_VERSION.apk.sha256")" >> apk.env
+        for f in "openGym-$APK_VERSION.apk" "openGym-$APK_VERSION.apk.sha256"; do
           curl --fail --silent --show-error \
             --header "JOB-TOKEN: $CI_JOB_TOKEN" \
             --upload-file "$f" \
-            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/smitrix-android/$APK_VERSION/$f"
+            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/opengym-android/$APK_VERSION/$f"
           echo "uploaded $f to the generic package registry"
         done
       fi
   artifacts:
-    name: "SmiTriX-apk-$CI_COMMIT_REF_SLUG"
+    name: "openGym-apk-$CI_COMMIT_REF_SLUG"
     paths:
-      - "SmiTriX-*.apk"
-      - "SmiTriX-*.apk.sha256"
+      - "openGym-*.apk"
+      - "openGym-*.apk.sha256"
     reports:
       dotenv: apk.env
     expire_in: 30 days
+  # Since v1.4.2 the released APK is built and signed on the release machine with the app's
+  # larger animations and published on GitHub (docs/APP_STORES.md). This mirror's APK would be a
+  # second, different file with the same version number, so it is only built on request now:
+  # one click on main or a merge request, never on a tag.
   rules:
     - !reference [.rules, not_on_schedule]
-    - *release_tag
-    # An APK build is ~8 minutes of shared-runner time; on main and MRs it is one click
-    # away rather than automatic. Flip `when: manual` off to have every push build one.
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
       allow_failure: true
+
+# The iOS build — the same VITE_MOBILE bundle, `cap sync` into ios/, `xcodebuild archive`.
+# It cannot run on the Linux runner: Xcode only exists on macOS, and gitlab.com's hosted
+# macOS runners are Premium/Ultimate only. So this job stays invisible until a Mac is
+# registered as a project runner (shell executor, Xcode + CocoaPods + Node installed) and
+# the CI variable IOS_RUNNER_TAG carries that runner's tag — set it, and the job appears
+# in the next main/tag pipeline on that machine. Until then nothing here runs, so treat the
+# script as the plan it is: it has not been through a pipeline yet.
+#
+# What comes out is an *unsigned* .ipa (CODE_SIGNING_ALLOWED=NO): the thing AltStore /
+# Sideloadly users install with their own Apple ID, and the honest maximum without an Apple
+# Developer Program membership. TestFlight or a signed build would add: an exportOptions
+# plist, the distribution certificate + provisioning profile as protected file variables,
+# and `xcodebuild -exportArchive` — none of which exists yet.
+build:ios:
+  stage: package
+  tags:
+    - $IOS_RUNNER_TAG
+  timeout: 40 minutes
+  needs:
+    - test:frontend
+    - job: release:preflight
+      optional: true
+  variables:
+    # A shell runner keeps its node_modules and DerivedData between jobs; nothing to cache.
+    GIT_STRATEGY: fetch
+  script:
+    - |
+      set -eu
+      cd frontend
+      npm ci
+      # `cap sync` also runs `pod install` for ios/ on macOS.
+      npm run build:mobile
+      VER="$(node -p "require('./package.json').version")"
+      # Build number = the Android versionCode, so both apps count the same way.
+      BUILD="$(sed -n 's/^ *versionCode \([0-9]*\).*/\1/p' android/app/build.gradle | sed -n 1p)"
+      [ -n "$BUILD" ] || { echo "could not read versionCode from android/app/build.gradle" >&2; exit 1; }
+      cd ios/App
+      xcodebuild -workspace App.xcworkspace -scheme App -configuration Release         -destination 'generic/platform=iOS'         -archivePath "$PWD/build/App.xcarchive"         MARKETING_VERSION="$VER" CURRENT_PROJECT_VERSION="$BUILD"         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""         archive | tail -40
+      # An .ipa is a zip with the .app under Payload/.
+      rm -rf Payload && mkdir Payload
+      cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+      zip -qr "$CI_PROJECT_DIR/openGym-$VER-unsigned.ipa" Payload
+      cd "$CI_PROJECT_DIR"
+      sha256sum "openGym-$VER-unsigned.ipa" > "openGym-$VER-unsigned.ipa.sha256"
+      cat "openGym-$VER-unsigned.ipa.sha256"
+      echo "IPA_VERSION=$VER" > ipa.env
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        for f in "openGym-$VER-unsigned.ipa" "openGym-$VER-unsigned.ipa.sha256"; do
+          curl --fail --silent --show-error             --header "JOB-TOKEN: $CI_JOB_TOKEN"             --upload-file "$f"             "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/opengym-ios/$VER/$f"
+          echo "uploaded $f to the generic package registry"
+        done
+      fi
+  artifacts:
+    name: "openGym-ipa-$CI_COMMIT_REF_SLUG"
+    paths:
+      - "openGym-*.ipa"
+      - "openGym-*.ipa.sha256"
+    reports:
+      dotenv: ipa.env
+    expire_in: 30 days
+  rules:
+    - !reference [.rules, not_on_schedule]
+    - if: $IOS_RUNNER_TAG == null || $IOS_RUNNER_TAG == ""
+      when: never
+    - *release_tag
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
       allow_failure: true
@@ -560,9 +709,9 @@ verify:stack:
           pull_policy: always
       EOF
       docker compose -f docker-compose.yml -f ci-images.override.yml config --quiet
-      # --no-deps skips the `media` service (a 140 MB clone the smoke test does not need).
+      # --no-deps: start api and web only, from the images just built, nothing else from the file.
       docker compose -f docker-compose.yml -f ci-images.override.yml up -d --no-deps --no-build api web
-      NET="$(docker network ls --filter name=smitrix --format '{{.Name}}' | head -1)"
+      NET="$(docker network ls --filter name=opengym --format '{{.Name}}' | head -1)"
       curl() { docker run --rm --network "$NET" curlimages/curl:8.12.1 "$@"; }
       for i in $(seq 1 30); do
         curl -fsS http://web/api/health >/dev/null 2>&1 && break
@@ -616,13 +765,13 @@ verify:scan:
       for i in api web; do
         REF="$CI_REGISTRY_IMAGE/$i:$IMAGE_TAG"
         echo "=================== $REF"
-        trivy image --format cyclonedx --output "smitrix-$i-$IMAGE_TAG.cdx.json" "$REF"
+        trivy image --format cyclonedx --output "opengym-$i-$IMAGE_TAG.cdx.json" "$REF"
         trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$REF" || rc=1
       done
       if [ -n "${CI_COMMIT_TAG:-}" ]; then
-        for f in smitrix-*.cdx.json; do
+        for f in opengym-*.cdx.json; do
           curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" \
-            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/smitrix-sbom/$IMAGE_TAG/$f"
+            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/opengym-sbom/$IMAGE_TAG/$f"
           echo "uploaded $f to the generic package registry"
         done
       fi
@@ -631,7 +780,7 @@ verify:scan:
   artifacts:
     when: always
     paths:
-      - "smitrix-*.cdx.json"
+      - "opengym-*.cdx.json"
     expire_in: 90 days
   allow_failure: true
   rules:
@@ -642,9 +791,9 @@ verify:scan:
 
 # ---------------------------------------------------------------------------- pages
 
-# The browser-only demo: https://jogdandasmit.gitlab.io/SmiTriX/
+# The browser-only demo: https://opengym-bc111a.gitlab.io/
 # (that opaque host is GitLab's "unique domain" for Pages, on by default; the tidier
-# https://jogdandasmit.gitlab.io/SmiTriX/ 308s to it. Settings → Pages turns it off.)
+# https://duartesantos8.gitlab.io/opengym/ 308s to it. Settings → Pages turns it off.)
 # Pages serves static files only, so this build has no backend — VITE_DEMO=1 makes the
 # app boot straight into guest mode with a seeded example history (frontend/src/lib/demo.js).
 # Vite's base is './', so the bundle drops into a subdirectory unchanged.
@@ -662,9 +811,10 @@ pages:
       - frontend/.npm
   script:
     - cd frontend
-    - npm ci --cache .npm --prefer-offline --ignore-scripts --legacy-peer-deps
-    - VITE_IMG_BASE="$DATASET/images/" VITE_GIF_BASE="$DATASET/videos/" npm run build
+    - npm ci --cache .npm --prefer-offline --ignore-scripts
+    - npm run build
     - cd ..
+    - node scripts/catalogue/stage-media.mjs frontend/dist
     - rm -rf public && mv frontend/dist public
   artifacts:
     paths:
@@ -675,6 +825,7 @@ pages:
       changes:
         paths:
           - "frontend/**/*"
+          - "api/coach/core/**/*"
           - ".gitlab-ci.yml"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
@@ -689,8 +840,6 @@ release:
   timeout: 10 minutes
   needs:
     - job: build:images
-      artifacts: true
-    - job: build:apk
       artifacts: true
     - job: verify:stack
       artifacts: false
@@ -727,29 +876,26 @@ release:
       | \`$CI_REGISTRY_IMAGE/api\` | \`$SEMVER\` \`$MINOR\` \`latest\` | \`$IMAGE_DIGEST_API\` |
       | \`$CI_REGISTRY_IMAGE/web\` | \`$SEMVER\` \`$MINOR\` \`latest\` | \`$IMAGE_DIGEST_WEB\` |
 
-      Both images are linux/amd64 + linux/arm64. Android: \`SmiTriX-$APK_VERSION.apk\`, SHA-256 \`$APK_SHA256\` — check it with \`sha256sum -c SmiTriX-$APK_VERSION.apk.sha256\`. Built from $CI_COMMIT_SHA.
+      Both images are linux/amd64 + linux/arm64. The Android APK and the store apps are on the GitHub release: https://github.com/DuarteSantos8/openGym/releases/tag/$CI_COMMIT_TAG. Built from $CI_COMMIT_SHA.
       EOF
       cat release-notes.md
   release:
     tag_name: $CI_COMMIT_TAG
-    name: "SmiTriX $CI_COMMIT_TAG"
+    name: "openGym $CI_COMMIT_TAG"
     description: release-notes.md
     assets:
       links:
-        - name: "SmiTriX-$APK_VERSION.apk (Android, sideload)"
-          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/smitrix-android/$APK_VERSION/SmiTriX-$APK_VERSION.apk"
+        - name: "Android APK (GitHub release)"
+          url: "https://github.com/DuarteSantos8/openGym/releases/tag/$CI_COMMIT_TAG"
           link_type: package
-        - name: "SmiTriX-$APK_VERSION.apk.sha256 (checksum)"
-          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/smitrix-android/$APK_VERSION/SmiTriX-$APK_VERSION.apk.sha256"
-          link_type: other
         - name: "Container images (api + web)"
           url: "$CI_PROJECT_URL/container_registry"
           link_type: image
         - name: "SBOM api image (CycloneDX)"
-          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/smitrix-sbom/$IMAGE_TAG/smitrix-api-$IMAGE_TAG.cdx.json"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/opengym-sbom/$IMAGE_TAG/opengym-api-$IMAGE_TAG.cdx.json"
           link_type: other
         - name: "SBOM web image (CycloneDX)"
-          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/smitrix-sbom/$IMAGE_TAG/smitrix-web-$IMAGE_TAG.cdx.json"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/opengym-sbom/$IMAGE_TAG/opengym-web-$IMAGE_TAG.cdx.json"
           link_type: other
 
 # ---------------------------------------------------------------------- maintenance
@@ -812,4 +958,3 @@ mr:fork-pipelines:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
-

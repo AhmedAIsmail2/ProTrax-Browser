@@ -9,14 +9,14 @@
 //
 // Like the demo build, MOBILE is replaced at build time, so all of this folds away in
 // web bundles; the Capacitor plugins are only ever imported behind it.
-import { t } from './i18n-core.js'
+import { t, tn } from './i18n-core.js'
 import { isoOf, todayISO } from './format.js'
-import { effectiveRoutineId } from './history.js'
+import { effectiveRoutineIds } from './history.js'
+import { NUDGE_COPY, lineIndex, nudgeFor, nudgeMinute, toneOf } from './nudge.js'
+import { excusedOn } from './day-notes.js'
+import { stateJson } from './state-json.js'
 
-// The iPhone PWA is a separate web build. It shares the mobile-first UI, but uses browser storage
-// and web capabilities. Android builds keep using only VITE_MOBILE and their native plugins.
-export const IPHONE_PWA = import.meta.env.VITE_IPHONE_PWA === '1'
-export const MOBILE = import.meta.env.VITE_MOBILE === '1' || IPHONE_PWA
+export const MOBILE = import.meta.env.VITE_MOBILE === '1'
 
 // Some features only make sense on Android. The in-app updater downloads an .apk and hands it
 // to the system package installer — there is no equivalent on iOS (App Store only) or on the
@@ -34,28 +34,117 @@ export async function isAndroid() {
   }
 }
 
-const FILE = 'smitrix-state.json'
+// 'android' or 'ios' inside the phone app, null anywhere else: for what both native shells do,
+// each its own way (the rest alert: RestAlertPlugin.java and RestAlertPlugin.swift).
+export async function nativePlatform() {
+  if (!MOBILE) return null
+  try {
+    const { Capacitor } = await import('@capacitor/core')
+    const p = Capacitor.getPlatform()
+    return p === 'android' || p === 'ios' ? p : null
+  } catch (e) {
+    return null
+  }
+}
+
+const FILE = 'protrax-state.json'
+
+// Written whole to a second file first and then moved over the first, so a write cut short (the
+// app killed mid-write, the battery gone) never leaves a half file where the last good copy was.
+// A move that did not finish leaves the new copy under FILE_NEW: whichever of the two parses and
+// is the later one (`_ts`) is the copy.
+const FILE_NEW = 'protrax-state.next.json'
 
 export async function nativeLoad() {
-  if (IPHONE_PWA) return null
   try {
     const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
-    try {
-      const r = await Filesystem.readFile({ path: FILE, directory: Directory.Data, encoding: Encoding.UTF8 })
-      return JSON.parse(r.data)
-    } catch {
-      const r = await Filesystem.readFile({ path: 'fittrix-state.json', directory: Directory.Data, encoding: Encoding.UTF8 })
-      return JSON.parse(r.data)
+    const read = async path => {
+      try { return JSON.parse((await Filesystem.readFile({ path, directory: Directory.Data, encoding: Encoding.UTF8 })).data) } catch { return null }
     }
+    const main = await read(FILE)
+    const next = typeof Filesystem.rename === 'function' ? await read(FILE_NEW) : null
+    if (next && typeof next === 'object' && (!main || (Number(next._ts) || 0) > (Number(main._ts) || 0))) return next
+    return main
   } catch (e) { return null }   // first launch, or unreadable — localStorage copy takes over
 }
 
 export async function nativeSave(state) {
-  if (IPHONE_PWA) return
   try {
     const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
-    await Filesystem.writeFile({ path: FILE, directory: Directory.Data, data: JSON.stringify(state), encoding: Encoding.UTF8 })
+    const data = stateJson(state)
+    if (typeof Filesystem.rename === 'function') {
+      try {
+        await Filesystem.writeFile({ path: FILE_NEW, directory: Directory.Data, data, encoding: Encoding.UTF8 })
+        await Filesystem.rename({ from: FILE_NEW, to: FILE, directory: Directory.Data, toDirectory: Directory.Data })
+        return
+      } catch { /* the plain write below */ }
+    }
+    await Filesystem.writeFile({ path: FILE, directory: Directory.Data, data, encoding: Encoding.UTF8 })
   } catch (e) { /* keep the localStorage copy */ }
+}
+
+// "Connect to my server" mode (lib/remote.js): which of local-only / a paired remote account this
+// device chose, kept in its own file — never inside protrax-state.json, since that file's content
+// is exactly what pushState() PUTs to a server, and a device's own connection secret must never
+// travel as if it were training data.
+const REMOTE_FILE = 'protrax-remote.json'
+
+// Small JSON files in the app's private data directory, for device facts that must not ride
+// in S (which syncs and exports): the pairing, and how the Coach runs on this phone.
+export async function readJsonFile(name) {
+  try {
+    const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
+    const r = await Filesystem.readFile({ path: name, directory: Directory.Data, encoding: Encoding.UTF8 })
+    return JSON.parse(r.data)
+  } catch (e) { return null }
+}
+export async function writeJsonFile(name, data) {
+  try {
+    const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
+    await Filesystem.writeFile({ path: name, directory: Directory.Data, data: JSON.stringify(data), encoding: Encoding.UTF8 })
+  } catch (e) { /* not a Capacitor build, or the write failed — the caller's in-memory copy stands */ }
+}
+
+// Where the pairing lives. It holds the session token, so on iOS it stays out of iCloud and
+// computer backups: Library/NoCloud (Directory.LibraryNoCloud) is excluded from them, where
+// Documents (Directory.Data on iOS) is not. Android keeps it in the app's files and excludes it
+// by name in backup_rules.xml / data_extraction_rules.xml. A restored iPhone is paired again,
+// the same as an Android phone moved through a cloud backup.
+async function remoteDir() {
+  const { Directory } = await import('@capacitor/filesystem')
+  return (await nativePlatform()) === 'ios' ? Directory.LibraryNoCloud : Directory.Data
+}
+
+export async function loadRemoteFile() {
+  try {
+    const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
+    const directory = await remoteDir()
+    try {
+      const r = await Filesystem.readFile({ path: REMOTE_FILE, directory, encoding: Encoding.UTF8 })
+      return JSON.parse(r.data)
+    } catch (e) {
+      if (directory === Directory.Data) throw e
+    }
+    // An iPhone paired before the move: its pairing is still in Documents. Moved once, then the
+    // backed-up copy is gone.
+    const r = await Filesystem.readFile({ path: REMOTE_FILE, directory: Directory.Data, encoding: Encoding.UTF8 })
+    const data = JSON.parse(r.data)
+    await Filesystem.writeFile({ path: REMOTE_FILE, directory, data: JSON.stringify(data), encoding: Encoding.UTF8, recursive: true })
+    try { await Filesystem.deleteFile({ path: REMOTE_FILE, directory: Directory.Data }) } catch { /* moved; the old copy is only stale */ }
+    return data
+  } catch (e) { return null }   // never decided yet
+}
+
+export async function saveRemoteFile(data) {
+  try {
+    const { Filesystem, Encoding } = await import('@capacitor/filesystem')
+    const directory = await remoteDir()
+    await Filesystem.writeFile({ path: REMOTE_FILE, directory, data: JSON.stringify(data), encoding: Encoding.UTF8, recursive: true })
+    // The plugin marks Library/NoCloud as excluded from backup each time it looks the folder up,
+    // which does nothing while the folder does not exist yet: the first write creates it, so
+    // one more lookup marks it now rather than on the next launch.
+    if (directory !== (await import('@capacitor/filesystem')).Directory.Data) await Filesystem.stat({ path: REMOTE_FILE, directory })
+  } catch (e) { /* worst case: onboarding asks again next launch */ }
 }
 
 // Keep enough dates queued to cover normal app use between foregrounds without creating an
@@ -80,130 +169,64 @@ export function buildReminderNotifications(S, now = new Date()) {
     const day = new Date(date)
     day.setDate(date.getDate() + offset)
     const iso = isoOf(day)
-    if (completed.has(iso)) continue
-    const rid = effectiveRoutineId(state, iso)
-    const routine = routines.find(x => x.id === rid)
-    if (!routine) continue
+    // A day you noted as sick or away (lib/day-notes.js) is off the hook, reminder included.
+    if (completed.has(iso) || excusedOn(S, iso)) continue
+    // A weekday can hold several routines; name them all, or fall back to a count. Each day is
+    // asked as if it were today: a coach week's next session is due every day until it is done,
+    // so it is reminded every day (the app re-syncs these after every workout and on open).
+    const dayRoutines = effectiveRoutineIds(state, iso, iso).map(id => routines.find(x => x.id === id)).filter(Boolean)
+    if (!dayRoutines.length) continue
+    const label = dayRoutines.length <= 2 ? dayRoutines.map(r => r.name).join(' + ') : tn('{0} routine', '{0} routines', dayRoutines.length)
     const at = new Date(day)
     at.setHours(hour, minute, 0, 0)
     if (at <= now) continue
     notifications.push({
       id: REMINDER_ID_BASE + offset,
       title: t('Workout day'),
-      body: t('{0} is on the plan today — let’s go!', routine.name),
-      channelId: 'workout-reminders',
+      body: t('{0} is on the plan today. Let’s go!', label),
       schedule: { at, allowWhileIdle: true },
     })
   }
   return notifications
 }
 
-let actionListenerRegistered = false
-export async function initNotificationListeners() {
-  if (!MOBILE || IPHONE_PWA || actionListenerRegistered) return
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    actionListenerRegistered = true
-    await LocalNotifications.addListener('localNotificationActionPerformed', async action => {
-      if (action.actionId === 'ADD_30') {
-        const { useUI } = await import('../store/useUI.js')
-        useUI.getState().addRest(30)
-      } else if (action.actionId === 'SKIP') {
-        const { useUI } = await import('../store/useUI.js')
-        useUI.getState().stopRest()
-      }
+// The missed-workout nudge (lib/nudge.js) as native notifications: one per future date that would
+// be a missed day if nothing gets logged before its evening. nudgeFor() reads only workouts up to
+// that date, so asking about tomorrow and the day after already applies the back-off of a break
+// that goes on — at most 3 of these are ever queued past the last workout. Logging a workout
+// resyncs (every persist does), which drops the day and resets the count.
+export const NUDGE_WINDOW_DAYS = 7
+const NUDGE_ID_BASE = 2000
+export function buildNudgeNotifications(S, now = new Date()) {
+  const r = S?.reminder
+  if (!r?.on || !r.nudge) return []
+  const at = nudgeMinute(r.time || '08:00')
+  if (at == null) return []
+  const routines = Array.isArray(S.routines) ? S.routines : []
+  const copy = NUDGE_COPY[toneOf(r)]
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12)
+  const notifications = []
+  for (let offset = 0; offset < NUDGE_WINDOW_DAYS; offset++) {
+    const day = new Date(date)
+    day.setDate(date.getDate() + offset)
+    const iso = isoOf(day)
+    // a session on screen right now is today's workout in the making, not a miss
+    if (offset === 0 && S.active) continue
+    const ids = nudgeFor(S, iso)
+    if (!ids) continue
+    const names = ids.map(id => routines.find(x => x.id === id)?.name).filter(Boolean)
+    const label = names.length && names.length <= 2 ? names.join(' + ') : tn('{0} routine', '{0} routines', ids.length)
+    const when = new Date(day)
+    when.setHours(Math.floor(at / 60), at % 60, 0, 0)
+    if (when <= now) continue
+    notifications.push({
+      id: NUDGE_ID_BASE + offset,
+      title: t(copy.title),
+      body: t(copy.lines[lineIndex(iso, copy.lines.length)], label),
+      schedule: { at: when, allowWhileIdle: true },
     })
-  } catch (e) { /* */ }
-}
-
-export async function setupNotificationChannels() {
-  if (!MOBILE || IPHONE_PWA) return
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    await LocalNotifications.createChannel({
-      id: 'rest-timer',
-      name: 'Rest Timer',
-      description: 'Rest timer countdown and rest completion alerts',
-      importance: 5,
-      visibility: 1,
-      vibration: true,
-      lights: true,
-      lightColor: '#30D158',
-    }).catch(() => {})
-    await LocalNotifications.createChannel({
-      id: 'workout-reminders',
-      name: 'Workout Reminders',
-      description: 'Daily training reminders and scheduled routine alerts',
-      importance: 4,
-      visibility: 1,
-      vibration: true,
-      lights: true,
-      lightColor: '#30D158',
-    }).catch(() => {})
-    await LocalNotifications.registerActionTypes({
-      types: [
-        {
-          id: 'REST_TIMER_ACTIONS',
-          actions: [
-            { id: 'ADD_30', title: '+30s', foreground: false },
-            { id: 'SKIP', title: 'Skip', foreground: false, destructive: true },
-          ],
-        },
-      ],
-    }).catch(() => {})
-    await initNotificationListeners()
-  } catch (e) { /* channels are Android only */ }
-}
-
-export async function checkNotificationPermission() {
-  if (!MOBILE) return 'granted'
-  if (IPHONE_PWA) return 'denied'
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    const perm = await LocalNotifications.checkPermissions()
-    return perm.display || 'prompt'
-  } catch (e) {
-    return 'denied'
   }
-}
-
-export async function requestNotificationPermission() {
-  if (!MOBILE) return 'granted'
-  if (IPHONE_PWA) return 'denied'
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    await setupNotificationChannels()
-    await initNotificationListeners()
-    const perm = await LocalNotifications.requestPermissions()
-    return perm.display || 'denied'
-  } catch (e) {
-    return 'denied'
-  }
-}
-
-export async function sendTestNotification() {
-  if (!MOBILE || IPHONE_PWA) return false
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    let perm = await checkNotificationPermission()
-    if (perm !== 'granted') {
-      perm = await requestNotificationPermission()
-    }
-    if (perm !== 'granted') return false
-    await setupNotificationChannels()
-    await LocalNotifications.schedule({
-      notifications: [{
-        id: 8888,
-        title: 'ProTraX Active 🏋️',
-        body: 'Notifications are working! You will see rest timers and workout reminders here.',
-        channelId: 'workout-reminders',
-        schedule: { at: new Date(Date.now() + 500), allowWhileIdle: true },
-      }],
-    })
-    return true
-  } catch (e) {
-    return false
-  }
+  return notifications
 }
 
 // (Re)schedule the workout-day reminder: one one-off notification per future calendar date in
@@ -211,152 +234,257 @@ export async function sendTestNotification() {
 // may just have been edited. `interactive` gates the OS permission prompt to the Settings toggle;
 // a background resync never pops a dialog.
 export async function syncReminder(S, interactive = false) {
-  if (IPHONE_PWA) return true
+  // The gym reminder (lib/gym-reminder.js) decides on the phone whether to go off, from what it
+  // was last told about today: told again here, after every save and on every return to the app.
+  if (MOBILE) import('./gym-reminder.js').then(m => m.pushGymStatus(S)).catch(() => {})
   try {
     const { LocalNotifications } = await import('@capacitor/local-notifications')
     await LocalNotifications.cancel({ notifications: [
       ...LEGACY_REMINDER_IDS,
       ...Array.from({ length: REMINDER_WINDOW_DAYS }, (_, d) => ({ id: REMINDER_ID_BASE + d })),
+      ...Array.from({ length: NUDGE_WINDOW_DAYS }, (_, d) => ({ id: NUDGE_ID_BASE + d })),
     ] }).catch(() => {})
     const r = S.reminder
-    if (!r?.on) return true
-    await setupNotificationChannels()
+    // The background check (lib/nudge-check.js) follows what is scheduled: nothing, nothing to check.
+    const check = notifications => import('./nudge-check.js').then(m => m.armNudgeCheck(S, notifications)).catch(() => {})
+    if (!r?.on) { await check([]); return true }
     let perm = await LocalNotifications.checkPermissions()
     if (perm.display !== 'granted' && interactive) perm = await LocalNotifications.requestPermissions()
-    if (perm.display !== 'granted') return false
-    const notifications = buildReminderNotifications(S)
+    if (perm.display !== 'granted') { await check([]); return false }
+    const notifications = [...buildReminderNotifications(S), ...buildNudgeNotifications(S)]
     if (notifications.length) await LocalNotifications.schedule({ notifications })
+    await check(notifications)
     return true
   } catch (e) { return false }
-}
-
-const REST_TIMER_NOTIFICATION_ID = 9999
-const REST_TIMER_ACTIVE_ID = 9998
-
-export async function showRestTimerNotification(sec) {
-  if (!MOBILE || IPHONE_PWA || !(sec > 0)) return
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    let perm = await LocalNotifications.checkPermissions()
-    if (perm.display !== 'granted') {
-      perm = await LocalNotifications.requestPermissions()
-    }
-    if (perm.display !== 'granted') return
-    await setupNotificationChannels()
-    await LocalNotifications.cancel({
-      notifications: [
-        { id: REST_TIMER_NOTIFICATION_ID },
-        { id: REST_TIMER_ACTIVE_ID },
-      ],
-    }).catch(() => {})
-
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          id: REST_TIMER_ACTIVE_ID,
-          title: `Rest: ${sec}s`,
-          body: 'Resting between sets · Tap to return to workout',
-          channelId: 'rest-timer',
-          actionTypeId: 'REST_TIMER_ACTIONS',
-          ongoing: true,
-          autoCancel: false,
-          schedule: { at: new Date(Date.now() + 200), allowWhileIdle: true },
-        },
-        {
-          id: REST_TIMER_NOTIFICATION_ID,
-          title: 'Rest over — next set!',
-          body: 'Time to crush your next set! 💪',
-          channelId: 'rest-timer',
-          schedule: { at: new Date(Date.now() + sec * 1000), allowWhileIdle: true },
-        },
-      ],
-    })
-  } catch (e) { /* non-critical */ }
-}
-
-export async function cancelRestTimerNotification() {
-  if (!MOBILE || IPHONE_PWA) return
-  try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    await LocalNotifications.cancel({
-      notifications: [
-        { id: REST_TIMER_NOTIFICATION_ID },
-        { id: REST_TIMER_ACTIVE_ID },
-      ],
-    }).catch(() => {})
-  } catch (e) { /* non-critical */ }
 }
 
 // Capacitor emits appStateChange when the native shell returns to the foreground. The visibility
 // listener also covers WebView/browser transitions, and both are harmless on a non-mobile build.
 let reminderSyncStarted = false
 export function initReminderSync(getState) {
-  if (!MOBILE || IPHONE_PWA || reminderSyncStarted) return
+  if (!MOBILE || reminderSyncStarted) return
   reminderSyncStarted = true
   const resync = () => {
     if (document.visibilityState === 'hidden') return
     syncReminder(getState()).catch(() => {})
   }
   document.addEventListener('visibilitychange', resync)
-  import('@capacitor/app').then(({ App }) => {
+  // addListener is a promise of its own — it rejects when the App plugin is not behind the bridge
+  // (a native project cap sync never updated, a custom platform) — so it is returned into the
+  // catch below. Dropped inside a block, as it was before, that rejection went unhandled.
+  import('@capacitor/app').then(({ App }) =>
     App.addListener('appStateChange', ({ isActive }) => { if (isActive) resync() })
-  }).catch(() => {})
+  ).catch(() => {})
+}
+
+// Runs cb whenever the native shell returns to the foreground — the store pulls the account's
+// state then, so a phone that sat in a pocket all afternoon shows what the desktop did. No-op
+// off mobile; the store's own visibility/focus listeners cover the browser.
+export function onAppActive(cb) {
+  if (!MOBILE) return
+  // Returned, not dropped, for the same reason as in initReminderSync.
+  import('@capacitor/app').then(({ App }) =>
+    App.addListener('appStateChange', ({ isActive }) => { if (isActive) cb() })
+  ).catch(() => {})
 }
 
 // WKWebView can't do blob-URL downloads, so the backup goes out through the OS share sheet
 // (Files, AirDrop, mail, …) from a temp file instead.
 export async function shareExport(json, filename) {
-  if (IPHONE_PWA) {
-    const file = new File([json], filename, { type: 'application/json' })
-    const url = URL.createObjectURL(file)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.style.display = 'none'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    // Keep the object URL alive long enough for Safari to start the download.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    return
-  }
   const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
   const { Share } = await import('@capacitor/share')
   const w = await Filesystem.writeFile({ path: filename, directory: Directory.Cache, data: json, encoding: Encoding.UTF8 })
   await Share.share({ title: filename, url: w.uri })
 }
 
-// Share a generated workout image through Android's native share sheet.
-export async function shareWorkoutCard(blob, filename, title, text) {
-  if (!MOBILE || IPHONE_PWA) return false
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error || new Error('Could not read share image'))
-    reader.onload = () => resolve(String(reader.result).split(',')[1])
-    reader.readAsDataURL(blob)
-  })
+// The same for a binary export — the backup with photos and videos (lib/backup-media.js). The
+// file crosses the native bridge as base64 in 3 MB pieces, never as one string the size of the
+// whole zip, which could be a few hundred MB.
+export async function shareExportBlob(blob, filename) {
   const { Filesystem, Directory } = await import('@capacitor/filesystem')
   const { Share } = await import('@capacitor/share')
-  const file = await Filesystem.writeFile({ path: filename, directory: Directory.Cache, data: base64 })
-  await Share.share({ title, text, url: file.uri, dialogTitle: title })
-  return true
+  const { toBase64 } = await import('./media-store-fs.js')
+  const CHUNK = 3 * 1024 * 1024
+  for (let o = 0; o < blob.size || o === 0; o += CHUNK) {
+    const data = toBase64(new Uint8Array(await blob.slice(o, o + CHUNK).arrayBuffer()))
+    if (o === 0) await Filesystem.writeFile({ path: filename, directory: Directory.Cache, data })
+    else await Filesystem.appendFile({ path: filename, directory: Directory.Cache, data })
+    if (!blob.size) break
+  }
+  const { uri } = await Filesystem.getUri({ path: filename, directory: Directory.Cache })
+  await Share.share({ title: filename, url: uri })
 }
 
-// "Auto-backup on changes" (Settings): a dated snapshot dropped into the Documents folder —
+// Hand a self-contained HTML document (lib/plan-share.js planPrintHTML) to the OS print flow.
+// Android routes it through the system PrintManager — "Save as PDF", "Save to Drive", a real
+// printer; iOS through the print sheet — "Save to Files" (as PDF), share, print. Either way the
+// platform renders the PDF, so no PDF library rides in the bundle. The local `Print` plugin is
+// registered natively (android MainActivity, ios PrintPlugin.m); on the web build this file's
+// callers gate on MOBILE and never reach here.
+// `paper` ('a4' | 'letter') is the size the sheet starts on (lib/print-doc.js paperFor); Android
+// uses it, iOS takes the printer's or the region's own default. `footer` is the bottom line the
+// iOS plugin draws itself, since WebKit has no @page margin boxes: { left, page } with {0}/{1}
+// in `page` for the page number and the page count.
+export async function printHtml(html, name, { paper = 'a4', footer } = {}) {
+  const { registerPlugin } = await import('@capacitor/core')
+  const Print = registerPlugin('Print')
+  await Print.printHtml({ html, name, paper, ...(footer ? { footer } : {}) })
+}
+
+// "Auto-backup on changes" (Settings): a dated snapshot dropped into Documents/ProTraX/ —
 // visible in Files (iOS) / a file manager (Android), unlike the private mirror nativeSave keeps
 // — so whatever the user points at that folder (a sync app, a manual copy) always has something
 // recent. One file per day; later triggers the same day just overwrite it.
+//
+// The folder is ours alone (#161): until v1.3.9 the files landed in the Documents root, so a
+// sync app pointed at them had to carry the whole Documents folder along, and a year of daily
+// copies piled up there. Now each write keeps only the newest AUTO_BACKUP_KEEP in the folder.
+// The root is never pruned: a manual export saved there carries the same name, and nothing
+// tells it apart from an old automatic copy, so those stay for the person to clear (Import
+// backup still reads either kind).
+export const AUTO_BACKUP_DIR = 'ProTraX'
+export const AUTO_BACKUP_KEEP = 14
+// Only the exact names writeAutoBackup gives its files are ever pruned; anything else someone
+// keeps in the folder is theirs.
+const AUTO_BACKUP_NAME = /^protrax-backup-\d{4}-\d{2}-\d{2}(-[2-9])?\.json$/
+
+// Android's scoped storage lets an install write over, list and delete only the files it wrote
+// itself. After a reinstall, or with the test build beside the real one, today's name can belong
+// to the other install: writing it fails with EACCES, and that day went without a copy, silently.
+// The copy then goes under the day's next name (-2 up to -9), which this install owns after its first write.
+// The other install's files stay where they are; this one cannot see them to prune them.
 export async function writeAutoBackup(state) {
-  if (IPHONE_PWA) return
-  try {
-    const { Filesystem, Directory, Encoding } = await import('@capacitor/filesystem')
-    await Filesystem.writeFile({
-      path: `protrax-backup-${todayISO()}.json`,
-      directory: Directory.Documents,
-      data: JSON.stringify(state),
-      encoding: Encoding.UTF8,
-      recursive: true,
-    })
-  } catch (e) { /* best effort — the private mirror in Directory.Data still has the data */ }
+  const day = todayISO()
+  // A folder the person chose (Android, #161) comes first. When it can no longer be written —
+  // the permission revoked, the folder deleted, the sync app gone — the copy goes to the default
+  // folder after all, and Settings says so: a backup that silently stops is the one thing this
+  // feature must not do.
+  if (await writeToChosenFolder(state, day)) return
+  let fs
+  try { fs = await import('@capacitor/filesystem') } catch (e) { return }
+  const write = name => fs.Filesystem.writeFile({
+    path: `${AUTO_BACKUP_DIR}/${name}`,
+    directory: fs.Directory.Documents,
+    data: JSON.stringify(state),
+    encoding: fs.Encoding.UTF8,
+    recursive: true,
+  })
+  // The day's names in turn: a second earlier install (or a third) can own the first two, and that
+  // day then went without a copy, silently, while the newest file there was another install's.
+  let name = null
+  for (const suffix of ['', '-2', '-3', '-4', '-5', '-6', '-7', '-8', '-9']) {
+    const n = `protrax-backup-${day}${suffix}.json`
+    try { await write(n); name = n; break } catch (e) { /* owned by another install, or the disk said no: the next name */ }
+  }
+  if (!name) return   // best effort — the private mirror in Directory.Data still has the data
+  // Pruning waits for a successful write: a full disk must never cost the copies already there.
+  await pruneAutoBackups(fs, name)
 }
 
+async function pruneAutoBackups({ Filesystem, Directory }, written) {
+  let files
+  try { files = (await Filesystem.readdir({ path: AUTO_BACKUP_DIR, directory: Directory.Documents })).files || [] } catch (e) { return }
+  const older = files
+    // Capacitor before 4 listed bare names; since then an object that also says what it is.
+    .filter(f => typeof f === 'string' || f?.type !== 'directory')
+    .map(f => (typeof f === 'string' ? f : f?.name))
+    // The copy just written is never a candidate, even if a clock set back makes it sort
+    // below the others: it is one of the AUTO_BACKUP_KEEP whatever its date says.
+    .filter(n => AUTO_BACKUP_NAME.test(n || '') && n !== written)
+    // Newest first by the date in the name, which a sync app or a copy cannot disturb the way
+    // it can a modification time.
+    .sort().reverse()
+  for (const n of older.slice(AUTO_BACKUP_KEEP - 1)) {
+    try { await Filesystem.deleteFile({ path: `${AUTO_BACKUP_DIR}/${n}`, directory: Directory.Documents }) } catch (e) { /* one stuck file does not stop the rest */ }
+  }
+}
+/* ------------------------------------------------- the backup folder (#161) --
+   Android only: the system folder picker (Storage Access Framework) through the local
+   BackupFolder plugin (android/.../BackupFolderPlugin.java), since @capacitor/filesystem cannot
+   write into a picked folder. The choice is a fact of this phone, kept in its own private file
+   and never in S: S syncs and exports, and a content:// address means nothing anywhere else.
+
+   { uri, label }       the chosen folder, and its name as the picker showed it
+   { lost, lostLabel }  the folder stopped accepting copies; they go to Documents/ProTraX again
+   {}                   the default, Documents/ProTraX */
+export const BACKUP_FOLDER_FILE = 'protrax-backup-folder.json'
+
+// The plugin proxy lives here and is never handed through a promise: a Capacitor plugin proxy
+// answers every property, `then` included, so a promise resolving to it never settles (#42/#58).
+let folderPlugin = null
+async function loadFolderPlugin() {
+  if (folderPlugin) return
+  const { registerPlugin } = await import('@capacitor/core')
+  folderPlugin = registerPlugin('BackupFolder')
+}
+
+let folderState = null   // the file's content once read; {} for the default
+const folderListeners = new Set()
+const setFolderState = async next => {
+  folderState = next
+  await writeJsonFile(BACKUP_FOLDER_FILE, next)
+  folderListeners.forEach(fn => { try { fn(next) } catch (e) { /* a listener's problem */ } })
+}
+
+/** Where auto-backup writes on this phone: { uri, label } | { lost, lostLabel } | {}. */
+export async function backupFolder() {
+  if (!folderState) {
+    const saved = await readJsonFile(BACKUP_FOLDER_FILE)
+    folderState = saved && typeof saved === 'object' ? saved : {}
+  }
+  return folderState
+}
+
+/** Settings listens, so a fallback in the middle of a backup shows without a reload. */
+export function onBackupFolderChange(fn) {
+  folderListeners.add(fn)
+  return () => folderListeners.delete(fn)
+}
+
+/** Opens the system folder picker. Resolves to the new state, or null when cancelled. */
+export async function chooseBackupFolder() {
+  await loadFolderPlugin()
+  const picked = await folderPlugin.pick()
+  if (!picked?.uri) return null
+  const before = await backupFolder()
+  if (before.uri && before.uri !== picked.uri) await releaseFolder(before.uri)
+  const next = { uri: picked.uri, label: picked.label || null }
+  await setFolderState(next)
+  return next
+}
+
+/** Back to Documents/ProTraX; also how the warning about a lost folder is put away. */
+export async function resetBackupFolder() {
+  const before = await backupFolder()
+  if (before.uri) await releaseFolder(before.uri)
+  await setFolderState({})
+  return folderState
+}
+
+async function releaseFolder(uri) {
+  try { await loadFolderPlugin(); await folderPlugin.release({ uri }) } catch (e) { /* already gone */ }
+}
+
+// True when today's copy is in the chosen folder. False with no folder chosen, and after a
+// failure, which is recorded so Settings can say the copies went to the default folder.
+async function writeToChosenFolder(state, day) {
+  const folder = await backupFolder()
+  if (!folder.uri) return false
+  const name = `protrax-backup-${day}.json`
+  try {
+    await loadFolderPlugin()
+    const { ok } = await folderPlugin.check({ uri: folder.uri })
+    if (!ok) throw new Error('permission lost')
+    await folderPlugin.write({ uri: folder.uri, name, data: JSON.stringify(state) })
+  } catch (e) {
+    await setFolderState({ lost: true, lostLabel: folder.label || null })
+    await releaseFolder(folder.uri)
+    return false
+  }
+  // Pruning waits for a successful write, and only ever touches the app's own dated names.
+  try { await folderPlugin.prune({ uri: folder.uri, keep: AUTO_BACKUP_KEEP, pattern: AUTO_BACKUP_NAME.source, written: name }) } catch (e) { /* housekeeping */ }
+  return true
+}
+
+// Tests only: forget the cached choice, as a fresh start of the app would.
+export function _resetBackupFolder() { folderState = null; folderPlugin = null; folderListeners.clear() }

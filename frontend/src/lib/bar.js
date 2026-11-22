@@ -11,7 +11,7 @@
 // per unit too: a kg profile gets the 20 kg olympic bar, a lb profile the 45 lb bar its
 // gym actually racks — not a 44.1 lb conversion no bar is stamped with.
 
-import { EXIDX } from './exercises.js'
+import { exerciseOf as exOf } from './exercises.js'
 
 /** Equipment values (e.eq) that put a bar in your hands. */
 export const BAR_EQ = new Set(['barbell', 'olympic barbell', 'ez barbell', 'smith machine', 'trap bar'])
@@ -21,7 +21,6 @@ export const DEFAULT_BAR_KG = { barbell: 20, 'olympic barbell': 20, 'ez barbell'
 /** The same bars as a lb profile knows them — real markings, not converted kg. */
 export const DEFAULT_BAR_LB = { barbell: 45, 'olympic barbell': 45, 'ez barbell': 25, 'smith machine': 20, 'trap bar': 55 }
 
-const exOf = exOrId => (typeof exOrId === 'string' ? EXIDX[exOrId] : exOrId)
 
 /** Whether this exercise (object or id) is done with a bar. */
 export const usesBar = exOrId => BAR_EQ.has(exOf(exOrId)?.eq)
@@ -30,76 +29,84 @@ export const usesBar = exOrId => BAR_EQ.has(exOf(exOrId)?.eq)
 export const defaultBarWeight = (eq, unit) =>
   (unit === 'lb' ? DEFAULT_BAR_LB : DEFAULT_BAR_KG)[eq] ?? null
 
-/** True when the user has set their own bar weight for this exercise. */
-export const hasBarOverride = (S, exId) => ((S?.barWeights || {})[exId] || 0) > 0
+/** The bar types Settings > Equipment > Your bars lists, most used first. */
+export const BAR_TYPES = ['barbell', 'olympic barbell', 'ez barbell', 'trap bar', 'smith machine']
+
+/** Quick picks for a bar's weight, per unit: the bars gyms actually rack (15 kg / 35 lb is the short one). */
+export const BAR_PICKS = { kg: [20, 15, 10, 7.5], lb: [45, 35, 25, 15] }
+export const barPicks = unit => BAR_PICKS[unit === 'lb' ? 'lb' : 'kg']
+
+/**
+ * Your own weight for a bar type, set once for the whole profile (Discord: the 15 kg short
+ * olympic bar). S.barDefaults = { kg: { 'olympic barbell': 15 }, lb: { … } }: kept per unit like
+ * the plate inventory, so a unit switch finds the other unit's bars instead of a 33.07 lb one.
+ * A plain setting, synced and stamped as a whole (lib/sync-merge.js stampEdits). null when you
+ * kept the built-in weight.
+ */
+export function ownBarDefault(S, eq) {
+  if (!BAR_EQ.has(eq)) return null
+  const v = S?.barDefaults?.[S?.unit === 'lb' ? 'lb' : 'kg']?.[eq]
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+/** The bar an exercise of this type starts from: yours for the type, else the built-in. */
+export const barTypeWeight = (S, eq) => ownBarDefault(S, eq) ?? defaultBarWeight(eq, S?.unit)
+
+/**
+ * A new S.barDefaults with the profile unit's `eq` set to `w`, or back on the built-in for
+ * anything not above 0 (or the built-in weight itself). Empty unit maps are dropped.
+ */
+export function withBarDefault(S, eq, w) {
+  const unit = S?.unit === 'lb' ? 'lb' : 'kg'
+  const all = { ...(S?.barDefaults && typeof S.barDefaults === 'object' ? S.barDefaults : {}) }
+  const mine = { ...(all[unit] || {}) }
+  const n = Math.round((Number(w) || 0) * 100) / 100
+  if (n > 0 && n !== defaultBarWeight(eq, unit)) mine[eq] = n; else delete mine[eq]
+  if (Object.keys(mine).length) all[unit] = mine; else delete all[unit]
+  return all
+}
+
+/** S.barDefaults with the profile unit back on the built-in bars; the other unit's are kept. */
+export const withStandardBars = S => BAR_TYPES.reduce((all, eq) => withBarDefault({ unit: S?.unit, barDefaults: all }, eq, 0), S?.barDefaults)
+
+/**
+ * A stored 0 is "no bar", not "unset" (issue #138). Smith machines that counterbalance their
+ * carriage put nothing in your hands, so the plate math and the drop-set steps have to start
+ * from the weight you logged, not from a 9 kg bar that is not there. The key being absent is
+ * what means "use the default for this bar type" — which is why the editor clears the key
+ * rather than writing a 0 when you ask for the default back.
+ */
+export const isNoBar = (S, exId) => (S?.barWeights || {})[exId] === 0
+
+/** True when the user has set their own bar weight for this exercise — including "no bar". */
+export const hasBarOverride = (S, exId) => {
+  const own = (S?.barWeights || {})[exId]
+  return own === 0 || own > 0
+}
 
 /**
  * Effective bar weight for one exercise, in the profile unit: the explicit
- * S.barWeights[exId] if set, else the default for the bar type. null for anything
- * that is not a bar exercise.
+ * S.barWeights[exId] if set — an explicit 0 is "no bar" (a Smith machine whose carriage is
+ * counterbalanced, issue #138) and stays 0 — else your bar for the type (ownBarDefault), else
+ * the built-in default. null for anything that is not a bar exercise.
  */
 export function barWeightFor(S, exOrId) {
   const ex = exOf(exOrId)
   if (!BAR_EQ.has(ex?.eq)) return null
   const own = (S?.barWeights || {})[ex.id]
+  if (own === 0) return 0
   if (own > 0) return own
-  return defaultBarWeight(ex.eq, S?.unit)
+  return barTypeWeight(S, ex.eq)
 }
 
 /**
  * Plates per side: (total − bar) / 2, rounded to 2 decimals. null when there is nothing
- * sensible to show — a missing number, or a total at or below the bar itself.
+ * sensible to show — a missing number, or a total at or below the bar itself. A bar of 0
+ * ("no bar") splits the whole total.
  */
 export function plateSplit(total, bar) {
-  if (!(total > 0) || !(bar > 0) || total <= bar) return null
+  // `bar` of 0 is a real answer, not a missing one: with no bar every kilo you logged is on the
+  // ends, so the split is simply half of it (issue #138).
+  if (!(total > 0) || !(bar >= 0) || bar === null || bar === undefined || total <= bar) return null
   return Math.round(((total - bar) / 2) * 100) / 100
-}
-
-export const STANDARD_PLATES_KG = [
-  { weight: 25, color: '#e53935', label: '25' },
-  { weight: 20, color: '#1e88e5', label: '20' },
-  { weight: 15, color: '#fbc02d', label: '15' },
-  { weight: 10, color: '#43a047', label: '10' },
-  { weight: 5, color: '#eceff1', label: '5' },
-  { weight: 2.5, color: '#37474f', label: '2.5' },
-  { weight: 1.25, color: '#90a4ae', label: '1.25' },
-  { weight: 0.5, color: '#78909c', label: '0.5' }
-]
-
-export const STANDARD_PLATES_LB = [
-  { weight: 45, color: '#1e88e5', label: '45' },
-  { weight: 35, color: '#fbc02d', label: '35' },
-  { weight: 25, color: '#43a047', label: '25' },
-  { weight: 10, color: '#37474f', label: '10' },
-  { weight: 5, color: '#eceff1', label: '5' },
-  { weight: 2.5, color: '#90a4ae', label: '2.5' }
-]
-
-/**
- * Calculates optimal plate inventory needed per side.
- */
-export function calculatePlates(perSide, unit = 'kg') {
-  if (!(perSide > 0)) return []
-  const available = unit === 'lb' ? STANDARD_PLATES_LB : STANDARD_PLATES_KG
-  let remaining = Math.round(perSide * 100) / 100
-  const result = []
-
-  for (const plate of available) {
-    if (remaining <= 0) break
-    const count = Math.floor(remaining / plate.weight)
-    if (count > 0) {
-      result.push({ ...plate, count })
-      remaining = Math.round((remaining - count * plate.weight) * 100) / 100
-    }
-  }
-  return result
-}
-
-/**
- * Returns plate discs needed per side for a given total and bar weight.
- */
-export function plateDiscsFor(totalWeight, barWeight, unit = 'kg') {
-  const perSide = plateSplit(totalWeight, barWeight)
-  if (!(perSide > 0)) return []
-  return calculatePlates(perSide, unit)
 }

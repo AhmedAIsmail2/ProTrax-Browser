@@ -1,6 +1,7 @@
 import { Component } from 'react'
 import { useStore } from '../store/useStore.js'
 import { t } from '../lib/i18n.js'
+import { markDiscarded } from '../lib/watch-sync.js'
 import Icon from './Icon.jsx'
 import { Button } from './ui.jsx'
 
@@ -15,7 +16,7 @@ import { Button } from './ui.jsx'
 export default class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { failed: false } }
   static getDerivedStateFromError() { return { failed: true } }
-  componentDidCatch(err) { console.error('SmiTriX render error:', err) }
+  componentDidCatch(err) { console.error('ProTraX render error:', err) }
 
   render() {
     if (!this.state.failed) return this.props.children
@@ -27,10 +28,12 @@ export default class ErrorBoundary extends Component {
           <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('Something went wrong')}</div>
           {t('This screen could not be drawn. Your data is safe on this device.')}
         </div>
-        <Button variant="primary" icon="reset" onClick={() => location.reload()}>{t('Reload SmiTriX')}</Button>
+        <Button variant="primary" icon="reset" onClick={() => location.reload()}>{t('Reload ProTraX')}</Button>
         {active && <>
           <div style={{ height: 8 }} />
           <Button variant="danger" icon="trash" onClick={() => {
+            // The watch hears it was discarded, not finished (#776).
+            markDiscarded(useStore.getState().S.active?.id)
             useStore.getState().update(s => { s.active = null })
             location.reload()
           }}>{t('Discard the running workout')}</Button>

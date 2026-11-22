@@ -11,7 +11,8 @@ import { loadStarterPlan, starterPlanSheet } from './sheets.jsx'
 const mounted = []
 
 const S = () => useStore.getState().S
-const nameOn = day => S().routines.find(r => r.id === S().week[day])?.name
+// S.week[day] is a routine-id list now; the starter plan writes a one-element list per day.
+const nameOn = day => S().routines.find(r => r.id === [].concat(S().week[day] ?? [])[0])?.name
 
 // Renders whatever sheet is on top and returns its host element.
 function renderTop() {
@@ -57,7 +58,7 @@ describe('starter plan chooser', () => {
   })
 
   it('loads straight away when the plan’s weekdays are free, without asking', () => {
-    useStore.setState(s => ({ S: { ...s.S, week: { 0: 'mine', 6: 'mine' } } }))
+    useStore.setState(s => ({ S: { ...s.S, week: { 0: ['mine'], 6: ['mine'] } } }))
     choose('Upper / Lower')
 
     expect(useUI.getState().sheets).toHaveLength(0)   // no confirmation was raised
@@ -65,20 +66,30 @@ describe('starter plan chooser', () => {
     expect(nameOn(2)).toBe('Lower A')
     expect(nameOn(4)).toBe('Upper B')
     expect(nameOn(5)).toBe('Lower B')
-    expect(S().week[0]).toBe('mine')                  // untouched weekdays stay put
-    expect(S().week[6]).toBe('mine')
+    expect(S().week[0]).toEqual(['mine'])             // untouched weekdays stay put
+    expect(S().week[6]).toEqual(['mine'])
     expect(S().routines[0].name).toBe('My routine')   // and nothing is deleted
     expect(useUI.getState().toastMsg).toBe('Upper / Lower loaded')
   })
 
+  it('loading the same plan twice reuses its routines instead of duplicating them', () => {
+    expect(loadStarterPlan('upper-lower')).toBe(true)
+    const ids = S().routines.map(r => r.id)
+    const week = structuredClone(S().week)
+    expect(loadStarterPlan('upper-lower')).toBe(true)
+    expect(S().routines.map(r => r.id)).toEqual(ids)
+    expect(S().routines.filter(r => r.name === 'Upper A')).toHaveLength(1)
+    expect(S().week).toEqual(week)
+  })
+
   it('asks first when a weekday the plan wants is already taken', () => {
-    useStore.setState(s => ({ S: { ...s.S, week: { 3: 'mine' } } }))
+    useStore.setState(s => ({ S: { ...s.S, week: { 3: ['mine'] } } }))
     choose('Full Body')
 
     const confirm = renderTop()
     expect(confirm.querySelector('h3').textContent).toBe('Load Full Body?')
     expect(confirm.textContent).toContain('Monday, Wednesday and Friday')
-    expect(S().week[3]).toBe('mine')                  // nothing applied yet
+    expect(S().week[3]).toEqual(['mine'])                  // nothing applied yet
     expect(S().routines).toHaveLength(1)
 
     act(() => { buttonFor(confirm, 'Load plan').click() })
@@ -88,7 +99,7 @@ describe('starter plan chooser', () => {
   })
 
   it('leaves everything alone when the confirmation is cancelled', () => {
-    useStore.setState(s => ({ S: { ...s.S, week: { 1: 'mine' } } }))
+    useStore.setState(s => ({ S: { ...s.S, week: { 1: ['mine'] } } }))
     const before = structuredClone(S())
     choose('5×5')
 
@@ -99,22 +110,78 @@ describe('starter plan chooser', () => {
   })
 
   it('does not ask when only weekdays outside the plan are occupied', () => {
-    useStore.setState(s => ({ S: { ...s.S, week: { 2: 'mine', 4: 'mine' } } }))   // Tue + Thu
+    useStore.setState(s => ({ S: { ...s.S, week: { 2: ['mine'], 4: ['mine'] } } }))   // Tue + Thu
     choose('5×5')                                                                // wants Mon/Wed/Fri
     expect(useUI.getState().sheets).toHaveLength(0)
     expect(nameOn(1)).toBe('5×5 A')
   })
 })
 
+describe('starter plan chooser, fitted to equipment', () => {
+  const home = { id: 'home', name: 'Home', equipment: ['dumbbell'] }
+  const chip = (host, label) => [...host.querySelectorAll('.chip')].find(b => b.textContent === label)
+  const exIds = () => S().routines.slice(1).flatMap(r => r.ex.map(e => e.id))
+
+  it('points to Settings when there is no profile, and offers no chips', () => {
+    starterPlanSheet()
+    const host = renderTop()
+    expect(host.querySelector('.chip')).toBeNull()
+    expect(host.textContent).toContain('Add an equipment profile in Settings')
+  })
+
+  it('loads the plan as written unless a profile is picked', () => {
+    useStore.setState(s => ({ S: { ...s.S, equipProfiles: [home], activeEquipId: 'home', equipFilterOn: false } }))
+    starterPlanSheet()
+    const host = renderTop()
+    expect(chip(host, 'As written').className).toContain('on')
+    act(() => { rowFor(host, 'Push / Pull / Legs').click() })
+    expect(exIds()).toContain('0025')   // the barbell bench press
+  })
+
+  it('starts on the profile the library is filtered by, and fits the plan to it', () => {
+    useStore.setState(s => ({ S: { ...s.S, equipProfiles: [home], activeEquipId: 'home', equipFilterOn: true } }))
+    starterPlanSheet()
+    const host = renderTop()
+    expect(chip(host, 'Home').className).toContain('on')
+    act(() => { rowFor(host, 'Push / Pull / Legs').click() })
+    expect(exIds()).not.toContain('0025')
+    expect(useUI.getState().toastMsg).toMatch(/^Push \/ Pull \/ Legs loaded, fitted to "Home": \d+ swapped, 0 dropped$/)
+  })
+
+  it('lets you pick a profile by hand', () => {
+    useStore.setState(s => ({ S: { ...s.S, equipProfiles: [home], activeEquipId: '', equipFilterOn: false } }))
+    starterPlanSheet()
+    const host = renderTop()
+    act(() => { chip(host, 'Home').click() })
+    act(() => { rowFor(host, '5×5').click() })
+    expect(exIds()).not.toContain('0043')   // no barbell squat on a dumbbell-only profile
+  })
+
+  it('adds a fitted plan beside a same-named routine with other exercises, instead of reusing it', () => {
+    loadStarterPlan('ppl')
+    loadStarterPlan('ppl', { id: 'home', name: 'Home', equipment: ['dumbbell'] })
+    const pushes = S().routines.filter(r => r.name === 'Push Day')
+    expect(pushes).toHaveLength(2)
+    expect(pushes[0].ex.map(e => e.id)).not.toEqual(pushes[1].ex.map(e => e.id))
+    expect(S().week[1]).toEqual([pushes[1].id])
+  })
+
+  it('still reuses the routines when the same fitted plan is loaded twice', () => {
+    const home = { id: 'home', name: 'Home', equipment: ['dumbbell'] }
+    loadStarterPlan('ppl', home)
+    loadStarterPlan('ppl', home)
+    expect(S().routines.filter(r => r.name === 'Push Day')).toHaveLength(1)
+  })
+})
+
 describe('loadStarterPlan', () => {
-  it('appends independent routines each time the same plan is loaded', () => {
+  it('two different plans add independent routines', () => {
     loadStarterPlan('ppl')
     const first = S().routines.slice(1).map(r => r.id)
-    loadStarterPlan('ppl')
+    loadStarterPlan('full-body')
     const second = S().routines.slice(4).map(r => r.id)
     expect(S().routines).toHaveLength(7)
     expect(new Set([...first, ...second]).size).toBe(6)
-    expect(second.some(id => first.includes(id))).toBe(false)
   })
 
   it('refuses a plan it does not know and changes nothing', () => {
